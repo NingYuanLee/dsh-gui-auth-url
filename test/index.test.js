@@ -22,14 +22,14 @@ const services = () => ({
 
 test('declares the services it needs', () => {
 	assert.deepEqual(inject, ['connection', 'tools']);
-	assert.equal(name, 'gui-session');
+	assert.equal(name, 'gui-auth-url');
 });
 
-test('registers exactly one gui_session_url tool', () => {
+test('registers exactly one gui_auth_url tool', () => {
 	const ctx = fakeContext(services());
 	apply(ctx);
 	assert.equal(ctx.registered.length, 1);
-	assert.equal(ctx.registered[0].name, 'gui_session_url');
+	assert.equal(ctx.registered[0].name, 'gui_auth_url');
 	assert.equal(typeof ctx.registered[0].description, 'string');
 });
 

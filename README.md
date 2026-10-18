@@ -1,4 +1,4 @@
-# dsh-gui-session
+# dsh-gui-auth-url
 
 把当前运行中的 DeepSeek Harness Web GUI 的**合法带 token 地址**暴露成一个 agent 工具，让浏览器自动化和脚本能真正打开 GUI，而不是撞上 `401 dsh web authentication required`。
 
@@ -32,25 +32,36 @@ dsh web: http://127.0.0.1:3080/?token=AbC...
 
 ```bash
 # 装进你要用的 profile（web 或 desktop）
-dsh plugin --profile web add github:NingYuanLee/dsh-gui-session
+dsh plugin --profile web add github:NingYuanLee/dsh-gui-auth-url
 ```
 
 或先克隆再本地链接：
 
 ```bash
-git clone https://github.com/NingYuanLee/dsh-gui-session.git
-dsh plugin --profile web add ./dsh-gui-session
+git clone https://github.com/NingYuanLee/dsh-gui-auth-url.git
+dsh plugin --profile web add ./dsh-gui-auth-url
 ```
 
-npm 尚未发布（`dsh-gui-session` 目前只通过 GitHub 分发）。
+npm 尚未发布（`dsh-gui-auth-url` 目前只通过 GitHub 分发）。
 
-该插件是 bundle，`cordis.patch.yml` 会自动插入 `gui-session` 条目；`dsh plugin add` 也会自动把 `dsh-gui-session` 写进 profile 的 `dsh.profile.bundles`，无需手改配置。
+该插件是 bundle，`cordis.patch.yml` 会自动插入 `gui-auth-url` 条目；`dsh plugin add` 也会自动把 `dsh-gui-auth-url` 写进 profile 的 `dsh.profile.bundles`，无需手改配置。
+
+### 从旧名 `dsh-gui-session` 升级
+
+0.1.x 叫 `dsh-gui-session`。包名、Cordis 条目与工具名都变了，**必须重装一次**（GitHub 旧地址只会重定向代码，不会迁移 profile 里的依赖键）：
+
+```bash
+dsh plugin --profile <name> remove dsh-gui-session
+dsh plugin --profile <name> add github:NingYuanLee/dsh-gui-auth-url
+```
+
+重启 DSH 后工具名由 `gui_session_url` 变为 `gui_auth_url`；旧提示词/脚本里引用旧工具名的地方需要同步更新。
 
 ## 使用
 
 插件需要 Web 组合（提供 `connection` / `webServer` 服务）。装好后重启 DSH，模型即可看到工具：
 
-### `gui_session_url`
+### `gui_auth_url`
 
 无参数，返回：
 
@@ -84,28 +95,28 @@ npm 尚未发布（`dsh-gui-session` 目前只通过 GitHub 分发）。
 
 ## 排障
 
-**装完工具没出现？** 确认 profile 的 `package.json` 里 `dsh.profile.bundles` 含 `dsh-gui-session`。`dsh plugin add` 通常会写入，但安装中途失败可能只留下依赖、丢掉 bundle 条目：
+**装完工具没出现？** 确认 profile 的 `package.json` 里 `dsh.profile.bundles` 含 `dsh-gui-auth-url`。`dsh plugin add` 通常会写入，但安装中途失败可能只留下依赖、丢掉 bundle 条目：
 
 ```json
 {
-  "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-gui-session"] } }
+  "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-gui-auth-url"] } }
 }
 ```
 
-改完重启 DSH。用 `dsh --profile <name> --dump-config | grep gui-session` 可确认组合结果。
+改完重启 DSH。用 `dsh --profile <name> --dump-config | grep gui-auth-url` 可确认组合结果。
 
-**安装时报 `EPERM: rename ... node_modules\dsh-gui-session_tmp_*`？** 先停掉用该 profile 的 DSH 进程，再删掉 `node_modules\dsh-gui-session` 残留目录后重试；Windows 上被占用的目录无法 rename。
+**安装时报 `EPERM: rename ... node_modules\dsh-gui-auth-url_tmp_*`？** 先停掉用该 profile 的 DSH 进程，再删掉 `node_modules\dsh-gui-auth-url` 残留目录后重试；Windows 上被占用的目录无法 rename。
 
 ## 开发
 
 ```bash
 node --test test/*.test.js     # 14 个用例：URL 解析、降级、错误路径、工具注册
-node --check src/index.js
+node --check src/index.js && node --check src/auth-url.js
 ```
 
 ```text
-src/session.js   纯函数：base URL 解析 + 调 Host 取会话（可单测）
-src/index.js     Cordis 插件入口：注册 gui_session_url 工具
+src/auth-url.js   纯函数：base URL 解析 + 调 Host 取会话（可单测）
+src/index.js     Cordis 插件入口：注册 gui_auth_url 工具
 test/            node:test 用例
 ```
 

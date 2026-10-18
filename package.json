@@ -1,7 +1,7 @@
 {
-  "name": "dsh-gui-session",
-  "version": "0.1.1",
-  "displayName": "GUI Session",
+  "name": "dsh-gui-auth-url",
+  "version": "0.2.0",
+  "displayName": "GUI Auth URL",
   "description": "把当前运行的 DeepSeek Harness Web GUI 的合法带 token 地址暴露成一个工具，供 agent 和浏览器自动化直接打开。",
   "license": "MIT",
   "author": "NingYuanLee",
@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/index.js && node --check src/session.js",
+    "check": "node --check src/index.js && node --check src/auth-url.js",
     "prepublishOnly": "npm test && npm run check"
   },
   "engines": {
@@ -29,18 +29,18 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NingYuanLee/dsh-gui-session.git"
+    "url": "git+https://github.com/NingYuanLee/dsh-gui-auth-url.git"
   },
-  "homepage": "https://github.com/NingYuanLee/dsh-gui-session#readme",
+  "homepage": "https://github.com/NingYuanLee/dsh-gui-auth-url#readme",
   "bugs": {
-    "url": "https://github.com/NingYuanLee/dsh-gui-session/issues"
+    "url": "https://github.com/NingYuanLee/dsh-gui-auth-url/issues"
   },
   "keywords": [
     "dsh-plugin",
     "deepseek-harness",
     "gui",
     "browser-automation",
-    "session"
+    "authenticated-url"
   ],
   "publishConfig": {
     "registry": "https://registry.npmjs.org",

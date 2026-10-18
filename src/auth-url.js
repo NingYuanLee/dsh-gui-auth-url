@@ -1,5 +1,5 @@
 /**
- * @module dsh-gui-session/session
+ * @module dsh-gui-auth-url/auth-url
  *
  * Pure helpers that turn the live Host services into a usable Web GUI address.
  *
@@ -58,20 +58,20 @@ export function resolveGuiBaseUrl(ctx) {
 			return `${webServer.protocol}//127.0.0.1:${String(webServer.port)}`;
 		}
 	}
-	throw new Error('gui-session: this profile serves no Web GUI (no webApp or webServer service); start the Web UI first');
+	throw new Error('gui-auth-url: this profile serves no Web GUI (no webApp or webServer service); start the Web UI first');
 }
 
 /**
  * Ask the Host for this process's authenticated GUI URL.
  * @param {object} ctx - plugin context.
- * @returns {{url: string, origin: string, protocol: string, host: string, port: string, secure: boolean}} session facts.
+ * @returns {{url: string, origin: string, protocol: string, host: string, port: string, secure: boolean}} auth URL facts.
  * @throws {Error} when the connection service is absent or the URL carries no token.
  */
-export function resolveGuiSession(ctx) {
+export function resolveGuiAuthUrl(ctx) {
 	const baseUrl = resolveGuiBaseUrl(ctx);
 	const connection = service(ctx, CONNECTION);
 	if (connection === undefined || typeof connection.authenticatedUrl !== 'function') {
-		throw new Error('gui-session: the connection service is unavailable, so no browser session can be minted');
+		throw new Error('gui-auth-url: the connection service is unavailable, so no browser session can be minted');
 	}
 	const url = connection.authenticatedUrl(baseUrl);
 	const parsed = new URL(url);

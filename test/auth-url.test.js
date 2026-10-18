@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveGuiBaseUrl, resolveGuiSession } from '../src/session.js';
+import { resolveGuiBaseUrl, resolveGuiAuthUrl } from '../src/auth-url.js';
 
 /** Minimal fake Cordis context: services resolve through get() and properties. */
 const contextOf = (services) => ({
@@ -45,7 +45,7 @@ test('returns the Host-minted authenticated URL and its parts', () => {
 		webServer: { getOrigin: () => 'http://127.0.0.1:62924' },
 		connection: connectionWith(),
 	});
-	const session = resolveGuiSession(ctx);
+	const session = resolveGuiAuthUrl(ctx);
 	assert.match(session.url, /^http:\/\/127\.0\.0\.1:62924\/\?token=launch-token$/u);
 	assert.equal(session.origin, 'http://127.0.0.1:62924');
 	assert.equal(session.protocol, 'http:');
@@ -59,12 +59,12 @@ test('marks TLS listeners secure', () => {
 		webApp: { getAdvertisedUrl: () => 'https://127.0.0.1:8443' },
 		connection: connectionWith(),
 	});
-	assert.equal(resolveGuiSession(ctx).secure, true);
+	assert.equal(resolveGuiAuthUrl(ctx).secure, true);
 });
 
 test('refuses to answer when the connection service is missing', () => {
 	const ctx = contextOf({ webServer: { getOrigin: () => 'http://127.0.0.1:62924' } });
-	assert.throws(() => resolveGuiSession(ctx), /connection service is unavailable/u);
+	assert.throws(() => resolveGuiAuthUrl(ctx), /connection service is unavailable/u);
 });
 
 test('a real URL from connection carries exactly one token parameter', () => {
@@ -78,6 +78,6 @@ test('a real URL from connection carries exactly one token parameter', () => {
 			},
 		},
 	});
-	const parsed = new URL(resolveGuiSession(ctx).url);
+	const parsed = new URL(resolveGuiAuthUrl(ctx).url);
 	assert.deepEqual(parsed.searchParams.getAll('token'), ['abc']);
 });

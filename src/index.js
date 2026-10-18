@@ -1,5 +1,5 @@
 /**
- * @module dsh-gui-session
+ * @module dsh-gui-auth-url
  *
  * Expose the running Web GUI's authenticated address to the agent.
  *
@@ -15,9 +15,9 @@
  * address is a genuine first-party session, bound to this process.
  */
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import { resolveGuiSession } from './session.js';
+import { resolveGuiAuthUrl } from './auth-url.js';
 
-export const name = 'gui-session';
+export const name = 'gui-auth-url';
 
 /** Services required before the tool can mint anything. */
 export const inject = ['connection', 'tools'];
@@ -34,17 +34,17 @@ const DESCRIPTION = '返回当前正在运行的 DeepSeek Harness Web GUI 的合
 	+ '注意：url 内含本进程的临时启动令牌，只在当前进程存活期间有效；不要写入日志或提交到仓库。';
 
 /**
- * Mount the GUI-session tool.
+ * Mount the GUI auth URL tool.
  * @param {object} ctx - Host plugin context.
  */
 export function apply(ctx) {
 	ctx.tools.register(defineTool({
-		name: 'gui_session_url',
+		name: 'gui_auth_url',
 		description: DESCRIPTION,
 		parameters: {},
 		output: jsonOutput,
 		execute() {
-			return resolveGuiSession(ctx);
+			return resolveGuiAuthUrl(ctx);
 		},
 	}));
 }

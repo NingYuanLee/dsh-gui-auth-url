@@ -21,6 +21,6 @@ jobs:
       - name: Install peer dependencies for tests
         run: npm install --no-save @deepseek-ai/dsh-tools@0.2.0-rc.2
       - name: Syntax check
-        run: node --check src/index.js && node --check src/session.js
+        run: node --check src/index.js && node --check src/auth-url.js
       - name: Test
         run: node --test test/*.test.js
