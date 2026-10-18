@@ -1,6 +1,6 @@
 {
   "name": "dsh-gui-session",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "GUI Session",
   "description": "把当前运行的 DeepSeek Harness Web GUI 的合法带 token 地址暴露成一个工具，供 agent 和浏览器自动化直接打开。",
   "license": "MIT",

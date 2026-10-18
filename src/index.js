@@ -30,7 +30,7 @@ const jsonOutput = {
 const DESCRIPTION = '返回当前正在运行的 DeepSeek Harness Web GUI 的合法带 token 地址（第一方会话，非伪造）'
 	+ '。当需要打开/刷新/截图/验证本机 GUI、而直接访问 http://127.0.0.1:<port>/ 得到 '
 	+ '`401 dsh web authentication required` 时调用本工具，然后把返回的 url 交给浏览器或 HTTP 客户端。'
-	+ '返回 url、origin、protocol、host、port、secure。无参数。'
+	+ '无参数。工具结果就是可直接打开的 url 文本；程序化调用另可读到 origin、protocol、host、port、secure 字段。'
 	+ '注意：url 内含本进程的临时启动令牌，只在当前进程存活期间有效；不要写入日志或提交到仓库。';
 
 /**
