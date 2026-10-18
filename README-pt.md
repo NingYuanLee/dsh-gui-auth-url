@@ -72,8 +72,8 @@ O modelo vê o texto de `url`; os demais campos ficam para chamadas programátic
 
 | Item | Valor |
 |---|---|
-| dsh | `>=0.2.0-rc.2 <0.3.0` |
-| Node | `^22.19.0 \|\| >=24.0.0` |
+| dsh | `>=0.2.1-rc.2 <0.3.0-0` |
+| Node | `>=22.19.0` |
 | Verificado em | dsh `0.2.1-rc.2`, Windows x64, perfis desktop e web |
 | Combinação web | exige o serviço `connection`; um perfil sem GUI web devolve um erro claro |
 

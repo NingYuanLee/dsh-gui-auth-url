@@ -30,5 +30,5 @@ invalidates the token; calling the tool again returns the current value.
 
 ## Supported versions
 
-Security fixes target the latest `0.2.x` release on the `>=0.2.0-rc.2 <0.3.0` DeepSeek Harness
+Security fixes target the latest `0.2.x` release on the `>=0.2.1-rc.2 <0.3.0-0` DeepSeek Harness
 range. Older 0.1.x releases are unsupported.

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml/badge.svg)](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.0--rc.2%20%3C0.3.0-6f42c1)](package.json)
+[![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.1--rc.2%20%3C0.3.0--0-6f42c1)](package.json)
 [![GitHub stars](https://img.shields.io/github/stars/NingYuanLee/dsh-gui-auth-url?style=social)](https://github.com/NingYuanLee/dsh-gui-auth-url/stargazers)
 
 > Third-party community plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Not an official DeepSeek product. MIT licensed.
@@ -89,8 +89,8 @@ Typical use: while debugging DeepSeek Harness itself, let the agent open the liv
 
 | Item | Value |
 |---|---|
-| dsh | `>=0.2.0-rc.2 <0.3.0` |
-| Node | `^22.19.0 \|\| >=24.0.0` |
+| dsh | `>=0.2.1-rc.2 <0.3.0-0` |
+| Node | `>=22.19.0` |
 | Verified on | dsh `0.2.1-rc.2`, Windows x64, desktop and web profiles |
 | Web combination | needs the `connection` service; a profile without a Web GUI reports a clear error |
 

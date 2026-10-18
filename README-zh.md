@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml/badge.svg)](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.0--rc.2%20%3C0.3.0-6f42c1)](package.json)
+[![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.1--rc.2%20%3C0.3.0--0-6f42c1)](package.json)
 
 > DeepSeek Harness 第三方社区插件，非 DeepSeek 官方产品。MIT。
 
@@ -88,8 +88,8 @@ dsh plugin --profile <name> add github:NingYuanLee/dsh-gui-auth-url
 
 | 项 | 值 |
 |---|---|
-| dsh | `>=0.2.0-rc.2 <0.3.0` |
-| Node | `^22.19.0 \|\| >=24.0.0` |
+| dsh | `>=0.2.1-rc.2 <0.3.0-0` |
+| Node | `>=22.19.0` |
 | 验证环境 | dsh `0.2.1-rc.2`，Windows x64，desktop 与 web profile |
 | Web 组合 | 需要 `connection` 服务；无 Web GUI 的 profile 会给出明确错误 |
 

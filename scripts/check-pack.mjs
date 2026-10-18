@@ -20,6 +20,7 @@ const REQUIRED = [
 	'README.md',
 	'LICENSE',
 	'CHANGELOG.md',
+	'SECURITY.md',
 	'cordis.patch.yml',
 	'src/index.js',
 	'src/auth-url.js',

@@ -20,6 +20,7 @@
     "icon.svg",
     "LICENSE",
     "CHANGELOG.md",
+    "SECURITY.md",
     "README*.md"
   ],
   "scripts": {
@@ -29,8 +30,8 @@
     "prepublishOnly": "npm test && npm run check && npm run check:pack"
   },
   "engines": {
-    "node": "^22.19.0 || >=24.0.0",
-    "dsh": ">=0.2.0-rc.2 <0.3.0"
+    "node": ">=22.19.0",
+    "dsh": ">=0.2.1-rc.2 <0.3.0-0"
   },
   "packageManager": "pnpm@11.7.0",
   "repository": {
@@ -64,7 +65,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0 || >=0.1.7-0 <0.2.0 || >=0.2.0-0 <0.3.0 || >=0.2.1-0 <0.3.0"
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/dsh-tools": ">=0.2.1-0 <0.3.0"
   }
 }

@@ -20,17 +20,13 @@ test('declares an installable bundle with the current manifest version', () => {
 });
 
 test('declares the verified dsh and node ranges', () => {
-	assert.match(pkg.engines?.dsh ?? '', /^>=0\.2\.0-rc\.2 <0\.3\.0$/u);
-	assert.match(pkg.engines?.node ?? '', /\b22\b/u);
-	assert.match(pkg.engines?.node ?? '', /\b24\b/u);
+	assert.equal(pkg.engines?.dsh, '>=0.2.1-rc.2 <0.3.0-0');
+	assert.match(pkg.engines?.node ?? '', /22\.19/u);
 	assert.equal(pkg.packageManager, 'pnpm@11.7.0');
 });
 
-test('declares a cross-generation dsh-tools peer range', () => {
-	const range = pkg.peerDependencies?.['@deepseek-ai/dsh-tools'];
-	assert.equal(typeof range, 'string');
-	assert.match(range, />=0\.2\.0-0 <0\.3\.0/u);
-	assert.match(range, />=0\.2\.1-0 <0\.3\.0/u);
+test('declares a dsh-tools peer range for the current generation', () => {
+	assert.equal(pkg.peerDependencies?.['@deepseek-ai/dsh-tools'], '>=0.2.1-0 <0.3.0');
 });
 
 test('publishes locale display metadata for every supported language', () => {
@@ -55,7 +51,7 @@ test('exports an icon within the harness size and format limits', () => {
 
 test('lists every runtime and metadata file in the files whitelist', () => {
 	const files = pkg.files ?? [];
-	for (const entry of ['src', 'cordis.patch.yml', 'locale', 'icon.svg']) {
+	for (const entry of ['src', 'cordis.patch.yml', 'locale', 'icon.svg', 'SECURITY.md', 'README*.md']) {
 		assert.ok(files.includes(entry), `files includes ${entry}`);
 	}
 });

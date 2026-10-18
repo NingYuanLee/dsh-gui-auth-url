@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+对齐 DSH 官方插件基线：`engines.dsh` / `engines.node`、`@deepseek-ai/cordis` 与 `@deepseek-ai/dsh-tools` peer 范围统一为官方声明，`files` 纳入 `SECURITY.md`，README 兼容性表同步更新。
+
 ## 0.2.1
 
 按 DSH 社区插件交付规范补齐发布门禁，并修正跨版本声明。
