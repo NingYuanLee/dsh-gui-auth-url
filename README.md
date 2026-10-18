@@ -32,17 +32,19 @@ dsh web: http://127.0.0.1:3080/?token=AbC...
 
 ```bash
 # 装进你要用的 profile（web 或 desktop）
-dsh plugin --profile web add dsh-gui-session
+dsh plugin --profile web add github:NingYuanLee/dsh-gui-session
 ```
 
-或从源码本地链接：
+或先克隆再本地链接：
 
 ```bash
 git clone https://github.com/NingYuanLee/dsh-gui-session.git
 dsh plugin --profile web add ./dsh-gui-session
 ```
 
-该插件是 bundle，`cordis.patch.yml` 会自动插入 `gui-session` 条目，无需手改配置。
+npm 尚未发布（`dsh-gui-session` 目前只通过 GitHub 分发）。
+
+该插件是 bundle，`cordis.patch.yml` 会自动插入 `gui-session` 条目；`dsh plugin add` 也会自动把 `dsh-gui-session` 写进 profile 的 `dsh.profile.bundles`，无需手改配置。
 
 ## 使用
 
@@ -79,6 +81,20 @@ dsh plugin --profile web add ./dsh-gui-session
 - 桌面版每次启动端口随机，令牌也随之变化；工具每次调用都重新取当前值，所以不需要缓存。
 - 未鉴权工具只对 Web 组合的 profile 有意义（`headless` 等无 `webServer` 的 profile 上会报 “serves no Web GUI”）。
 - 插件依赖 DSH 的公开服务 `connection.authenticatedUrl` 与 `webServer.getOrigin`；若上游改动，会以明确错误暴露而不是静默返回错地址。
+
+## 排障
+
+**装完工具没出现？** 确认 profile 的 `package.json` 里 `dsh.profile.bundles` 含 `dsh-gui-session`。`dsh plugin add` 通常会写入，但安装中途失败可能只留下依赖、丢掉 bundle 条目：
+
+```json
+{
+  "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-gui-session"] } }
+}
+```
+
+改完重启 DSH。用 `dsh --profile <name> --dump-config | grep gui-session` 可确认组合结果。
+
+**安装时报 `EPERM: rename ... node_modules\dsh-gui-session_tmp_*`？** 先停掉用该 profile 的 DSH 进程，再删掉 `node_modules\dsh-gui-session` 残留目录后重试；Windows 上被占用的目录无法 rename。
 
 ## 开发
 
