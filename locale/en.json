@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GUI Auth URL",
+    "description": "Expose the running DeepSeek Harness Web GUI's authenticated URL as an agent tool, so browser automation can open the GUI instead of hitting 401."
+  }
+}

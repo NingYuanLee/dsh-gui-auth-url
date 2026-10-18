@@ -1,32 +1,38 @@
 {
   "name": "dsh-gui-auth-url",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "displayName": "GUI Auth URL",
-  "description": "把当前运行的 DeepSeek Harness Web GUI 的合法带 token 地址暴露成一个工具，供 agent 和浏览器自动化直接打开。",
+  "description": "Expose the running DeepSeek Harness Web GUI's authenticated URL as an agent tool, so browser automation can open the GUI instead of failing with 401.",
   "license": "MIT",
   "author": "NingYuanLee",
   "type": "module",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
     "cordis.patch.yml",
+    "locale",
+    "icon.svg",
     "LICENSE",
     "CHANGELOG.md",
-    "README.md"
+    "README*.md"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node --check src/index.js && node --check src/auth-url.js",
-    "prepublishOnly": "npm test && npm run check"
+    "check:pack": "node scripts/check-pack.mjs",
+    "prepublishOnly": "npm test && npm run check && npm run check:pack"
   },
   "engines": {
-    "node": ">=22.19.0",
+    "node": "^22.19.0 || >=24.0.0",
     "dsh": ">=0.2.0-rc.2 <0.3.0"
   },
+  "packageManager": "pnpm@11.7.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/NingYuanLee/dsh-gui-auth-url.git"
@@ -36,23 +42,29 @@
     "url": "https://github.com/NingYuanLee/dsh-gui-auth-url/issues"
   },
   "keywords": [
+    "dsh",
     "dsh-plugin",
+    "deepseek",
     "deepseek-harness",
+    "cordis",
     "gui",
+    "web-gui",
     "browser-automation",
-    "authenticated-url"
+    "authenticated-url",
+    "agent-tool"
   ],
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
-    "tag": "alpha"
+    "tag": "latest"
   },
   "dsh": {
+    "manifestVersion": 1,
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "~4.0.4",
-    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <0.3.0"
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0 || >=0.1.7-0 <0.2.0 || >=0.2.0-0 <0.3.0 || >=0.2.1-0 <0.3.0"
   }
 }

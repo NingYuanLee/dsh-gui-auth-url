@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GUI 鉴权地址",
+    "description": "把当前运行的 DeepSeek Harness Web GUI 的合法带 token 地址暴露成 agent 工具，浏览器自动化可直接打开，不再撞 401。"
+  }
+}

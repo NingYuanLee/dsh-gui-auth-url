@@ -6,21 +6,27 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        node: ['22.19.0', '24']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.19.0'
+          node-version: ${{ matrix.node }}
       - name: Install peer dependencies for tests
-        run: npm install --no-save @deepseek-ai/dsh-tools@0.2.0-rc.2
+        run: npm install --no-save @deepseek-ai/dsh-tools@0.2.1-rc.2
       - name: Syntax check
         run: node --check src/index.js && node --check src/auth-url.js
       - name: Test
         run: node --test test/*.test.js
+      - name: Pack check
+        run: npm run check:pack

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+按 DSH 社区插件交付规范补齐发布门禁，并修正跨版本声明。
+
+- 安装声明：`engines.node` 改为 `^22.19.0 || >=24.0.0`，同时覆盖 Node 22 与 24；`peerDependencies` 的 `@deepseek-ai/dsh-tools` 采用社区跨代范围，避免只声明单个 prerelease 元组。
+- 展示元数据：新增 `locale/en.json`、`zh.json`、`es.json`、`pt.json`、`hi.json`（`meta.title` / `meta.description`）与原创 `icon.svg`，并导出 `./locale/*.json`、`./icon`，Plugins 页与 Settings 不再显示原始包 id 和默认占位图。
+- 打包：`files` 纳入 `src`、patch、`locale`、图标与全部 README；新增 `scripts/check-pack.mjs`，在 `prepublishOnly` 与 CI 中校验 tarball 内容。
+- 文档：README 改为英文主文档并补齐中、西、葡、印地语版本；新增排障节（bundle 未写入、`allow-version` 精确版本豁免、Windows `EPERM`、无 Web GUI 的 profile）。
+- 测试：新增 `test/manifest.test.js`，把 manifest、展示元数据、README 标题一致性与打包不变量锁进 `node --test`。
+- `packageManager` 固定为 `pnpm@11.7.0`；`dsh.manifestVersion` 标记为 `1`。
+
 ## 0.2.0
 
 更名：`dsh-gui-session` → `dsh-gui-auth-url`。旧名里的 `session` 与 DSH 自身的「会话」概念（`~/.dsh/sessions`、聊天 session）撞车，而插件交付的是「一个可打开的第一方鉴权 URL」。

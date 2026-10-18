@@ -1,73 +1,71 @@
 # dsh-gui-auth-url
 
-把当前运行中的 DeepSeek Harness Web GUI 的**合法带 token 地址**暴露成一个 agent 工具，让浏览器自动化和脚本能真正打开 GUI，而不是撞上 `401 dsh web authentication required`。
+[![CI](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml/badge.svg)](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.0--rc.2%20%3C0.3.0-6f42c1)](package.json)
+[![GitHub stars](https://img.shields.io/github/stars/NingYuanLee/dsh-gui-auth-url?style=social)](https://github.com/NingYuanLee/dsh-gui-auth-url/stargazers)
 
-> 第三方社区插件，非 DeepSeek 官方产品。MIT。
+> Third-party community plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Not an official DeepSeek product. MIT licensed.
 
----
+English | [中文](README-zh.md) | [Español](README-es.md) | [Português](README-pt.md) | [हिन्दी](README-hi.md)
 
-## 问题
+Expose the running DeepSeek Harness Web GUI's **authenticated URL** as an agent tool, so browser automation and scripts can open the GUI instead of hitting `401 dsh web authentication required`.
 
-`dsh --profile web` 每个进程都会随机生成一个启动令牌，只打印一次：
+## The problem
 
+`dsh --profile web` mints a random launch token per process and prints it once:
+
+```text
+dsh web: http://127.0.0.1:3080/?token=...
 ```
-dsh web: http://127.0.0.1:3080/?token=AbC...
-```
 
-`GET /?token=…` 校验通过后写入一个绑定 host:port 的签名 Cookie 并 303 到 `/`。直接访问裸地址会得到：
+`GET /?token=...` verifies the token, sets a signed cookie bound to host:port, and redirects to `/`. Opening the bare address returns:
 
-```
+```text
 401 dsh web authentication required; reopen the URL printed by dsh web.
 ```
 
-桌面版（Electron）自己起 Host 进程（随机端口），**从不打印这一行**，所以任何外部浏览器/自动化工具打开 `http://127.0.0.1:<port>/` 必然 401。官方目前没有 `--no-browser-auth` 之类的开关。
+The Desktop edition starts its own Host process on a random port and never prints that line, so any external browser or automation tool opening `http://127.0.0.1:<port>/` always gets 401. There is no `--no-browser-auth` switch today.
 
-## 本插件的做法
+## How it works
 
-不碰 `$DSH_HOME/.credentials.yaml` 里的签名密钥，也不自己伪造 Cookie。插件运行在 Host 进程内，直接调用官方公开的 `connection.authenticatedUrl(baseUrl)` —— 也就是 `dsh web` 打印那行 URL 时用的同一个方法 —— 把结果作为工具返回值交给模型。
+The plugin runs inside the Host process and asks the official public API `connection.authenticatedUrl(baseUrl)` — the same call `dsh web` uses to build the URL it prints — then returns the result as a tool result.
 
-所以拿到的是**真正的第一方会话**，与你在终端里手动打开的是同一个东西。
+It never reads the cookie-signing secret in `$DSH_HOME/.credentials.yaml` and never mints a cookie itself, so the URL is a genuine first-party session bound to this process.
 
-## 安装
+Base URL resolution prefers `webApp.getAdvertisedUrl()` (respects `--public-url` and mounts), then `webServer.getOrigin()`, then protocol plus loopback port. Every call re-reads the live value, so random Desktop ports and restarted tokens need no cache.
+
+## Install
 
 ```bash
-# 装进你要用的 profile（web 或 desktop）
 dsh plugin --profile web add github:NingYuanLee/dsh-gui-auth-url
 ```
 
-或先克隆再本地链接：
+The package declares `dsh.bundle.patch`, so `dsh plugin add` writes the bundle into the profile's `dsh.profile.bundles` automatically. Restart DeepSeek Harness and the tool appears.
+
+Local checkout instead:
 
 ```bash
 git clone https://github.com/NingYuanLee/dsh-gui-auth-url.git
 dsh plugin --profile web add ./dsh-gui-auth-url
 ```
 
-npm 尚未发布（`dsh-gui-auth-url` 目前只通过 GitHub 分发）。
+npm is not published yet; GitHub is the only channel for now.
 
-该插件是 bundle，`cordis.patch.yml` 会自动插入 `gui-auth-url` 条目；`dsh plugin add` 也会自动把 `dsh-gui-auth-url` 写进 profile 的 `dsh.profile.bundles`，无需手改配置。
-
-### 从旧名 `dsh-gui-session` 升级
-
-0.1.x 叫 `dsh-gui-session`。包名、Cordis 条目与工具名都变了，**必须重装一次**（GitHub 旧地址只会重定向代码，不会迁移 profile 里的依赖键）：
+Upgrading from the old name `dsh-gui-session` (0.1.x): the package name, Cordis row id and tool name all changed, so reinstall once:
 
 ```bash
 dsh plugin --profile <name> remove dsh-gui-session
 dsh plugin --profile <name> add github:NingYuanLee/dsh-gui-auth-url
 ```
 
-重启 DSH 后工具名由 `gui_session_url` 变为 `gui_auth_url`；旧提示词/脚本里引用旧工具名的地方需要同步更新。
+## Usage
 
-## 使用
-
-插件需要 Web 组合（提供 `connection` / `webServer` 服务）。装好后重启 DSH，模型即可看到工具：
-
-### `gui_auth_url`
-
-无参数，返回：
+The plugin registers one tool, `gui_auth_url`, with no parameters. It returns:
 
 ```json
 {
-  "url": "http://127.0.0.1:3080/?token=AbC...",
+  "url": "http://127.0.0.1:3080/?token=...",
   "origin": "http://127.0.0.1:3080",
   "protocol": "http:",
   "host": "127.0.0.1",
@@ -76,26 +74,31 @@ dsh plugin --profile <name> add github:NingYuanLee/dsh-gui-auth-url
 }
 ```
 
-把 `url` 交给浏览器（`navigate_page`）、`curl` 或任何 HTTP 客户端即可进入 GUI。
+The model sees the `url` text; the other fields are available to programmatic callers. Hand the URL to `navigate_page`, `curl`, or any HTTP client to enter the GUI.
 
-典型用途：让 agent 在调试 DSH 自身时，用 chrome-devtools-mcp 实机验证 GUI 的布局、交互和 RPC，而不是只能读代码猜。
+Typical use: while debugging DeepSeek Harness itself, let the agent open the live GUI with chrome-devtools-mcp and verify layout, interaction and RPC for real instead of guessing from code.
 
-## 安全说明
+## Security
 
-- 返回的 URL 含**本进程的启动令牌**，只在当前 Host 进程存活期间有效；进程重启即失效。
-- 不要写入日志、提交到仓库或发到聊天里；它是凭据，等价于一次已登录会话。
-- 插件不读取 `.credentials.yaml`，也不生成 Cookie；权限边界与你在终端里执行 `dsh web` 完全一致。
-- 与 [Discussion #8678](https://github.com/deepseek-ai/deepseek-harness/discussions/8678) 描述的问题（沙箱内可读签名密钥并伪造 Cookie）**无关**：本插件不接触该密钥，因此不构成伪造会话的能力。
+- The returned URL contains **this process's launch token**. It is a credential equivalent to a signed-in session and only works while the Host process is alive.
+- Do not write it to logs, commit it, or paste it into chats. Regenerate by calling the tool again; a restart invalidates it.
+- The plugin does not read `.credentials.yaml` and does not mint cookies; its permission boundary is exactly that of `dsh web` in a terminal.
+- It is unrelated to [Discussion #8678](https://github.com/deepseek-ai/deepseek-harness/discussions/8678) (reading the signing secret inside a sandbox to forge cookies): this plugin never touches that secret.
 
-## 已知限制
+## Compatibility
 
-- 桌面版每次启动端口随机，令牌也随之变化；工具每次调用都重新取当前值，所以不需要缓存。
-- 未鉴权工具只对 Web 组合的 profile 有意义（`headless` 等无 `webServer` 的 profile 上会报 “serves no Web GUI”）。
-- 插件依赖 DSH 的公开服务 `connection.authenticatedUrl` 与 `webServer.getOrigin`；若上游改动，会以明确错误暴露而不是静默返回错地址。
+| Item | Value |
+|---|---|
+| dsh | `>=0.2.0-rc.2 <0.3.0` |
+| Node | `^22.19.0 \|\| >=24.0.0` |
+| Verified on | dsh `0.2.1-rc.2`, Windows x64, desktop and web profiles |
+| Web combination | needs the `connection` service; a profile without a Web GUI reports a clear error |
 
-## 排障
+Display metadata (`locale/*.json` plus the exported `./icon`) makes the Plugins page and Settings show a proper title, description and artwork instead of the raw package id. The plugin does not require a build step: it ships plain ESM JavaScript.
 
-**装完工具没出现？** 确认 profile 的 `package.json` 里 `dsh.profile.bundles` 含 `dsh-gui-auth-url`。`dsh plugin add` 通常会写入，但安装中途失败可能只留下依赖、丢掉 bundle 条目：
+## Troubleshooting
+
+**The tool does not appear after install.** Check that the profile's `package.json` lists `dsh-gui-auth-url` in `dsh.profile.bundles`. `dsh plugin add` normally writes it, but a failed install can leave only the dependency:
 
 ```json
 {
@@ -103,34 +106,42 @@ dsh plugin --profile <name> add github:NingYuanLee/dsh-gui-auth-url
 }
 ```
 
-改完重启 DSH。用 `dsh --profile <name> --dump-config | grep gui-auth-url` 可确认组合结果。
+Restart DeepSeek Harness, then confirm with `dsh --profile <name> --dump-config` and look for the `gui-auth-url` row.
 
-**安装时报 `EPERM: rename ... node_modules\dsh-gui-auth-url_tmp_*`？** 先停掉用该 profile 的 DSH 进程，再删掉 `node_modules\dsh-gui-auth-url` 残留目录后重试；Windows 上被占用的目录无法 rename。
-
-## 开发
+**Installation rejected because of a version mismatch.** DSH checks `engines.dsh` (or dsh peer ranges) at install time. If your host is outside the declared range, grant the exact-version exemption, reinstall, and revoke it once a compatible release exists:
 
 ```bash
-node --test test/*.test.js     # 14 个用例：URL 解析、降级、错误路径、工具注册
+dsh plugin --profile <profile> version-exemptions
+dsh plugin --profile <profile> allow-version dsh-gui-auth-url@0.2.1 --dsh-version <runtime> --accept-risk
+dsh plugin --profile <profile> revoke-version dsh-gui-auth-url@0.2.1
+```
+
+**`EPERM: rename ... node_modules\dsh-gui-auth-url_tmp_*` on Windows.** Stop the DSH process using that profile, delete the stale `node_modules\dsh-gui-auth-url` directory, and retry. A running process locks the directory.
+
+**"This profile serves no Web GUI".** The plugin only returns a URL when the profile mounts `webApp` or `webServer` plus `connection`. Headless-style profiles have no GUI to open.
+
+## Development
+
+```bash
+node --test test/*.test.js          # unit + manifest compliance tests
 node --check src/index.js && node --check src/auth-url.js
+npm run check:pack                  # verifies the published tarball contents
 ```
 
 ```text
-src/auth-url.js   纯函数：base URL 解析 + 调 Host 取会话（可单测）
-src/index.js     Cordis 插件入口：注册 gui_auth_url 工具
-test/            node:test 用例
+src/auth-url.js    pure helpers: base URL resolution + Host session call (unit-tested)
+src/index.js       Cordis plugin entry: registers the gui_auth_url tool
+locale/            display metadata (en, zh, es, pt, hi)
+test/              node:test suites, including packaging invariants
+scripts/           tarball check used by prepublishOnly and CI
 ```
 
-## 兼容性
+The plugin only registers a tool; `ctx.tools.register` returns the disposer that Cordis owns, so unloading or hot-reloading the plugin removes it cleanly.
 
-| 项 | 值 |
-|---|---|
-| dsh | `>=0.2.0-rc.2 <0.3.0` |
-| Node | `>=22.19.0` |
-| 验证环境 | dsh `0.2.1-rc.2`，Windows x64，desktop 与 web profile |
+## Related
 
-## 相关
-
-- [Discussion #5932](https://github.com/deepseek-ai/deepseek-harness/discussions/5932) — 本机脚本访问 Web UI 被 401，零回复
-- [Discussion #5828](https://github.com/deepseek-ai/deepseek-harness/discussions/5828) — 请求 `--no-browser-auth`，未采纳
-- [Discussion #9085](https://github.com/deepseek-ai/deepseek-harness/discussions/9085) — 桌面版拿不到合法会话
-- [官方连接契约](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/connection/README.md)
+- [Discussion #5932](https://github.com/deepseek-ai/deepseek-harness/discussions/5932) — local scripts hitting 401 on the Web UI
+- [Discussion #5828](https://github.com/deepseek-ai/deepseek-harness/discussions/5828) — request for `--no-browser-auth`, not adopted
+- [Discussion #9085](https://github.com/deepseek-ai/deepseek-harness/discussions/9085) — Desktop cannot obtain a valid session
+- [Official connection contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/connection/README.md)
+- [DeepSeek Harness community plugin registry](https://dsplugin.app/) — discover more plugins

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "URL de autenticação da GUI",
+    "description": "Expõe a URL autenticada da GUI web do DeepSeek Harness em execução como ferramenta do agente, para que a automação do navegador não receba 401."
+  }
+}
