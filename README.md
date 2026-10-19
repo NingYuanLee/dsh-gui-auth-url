@@ -33,7 +33,7 @@ The plugin runs inside the Host process and asks the official public API `connec
 
 It never reads the cookie-signing secret in `$DSH_HOME/.credentials.yaml` and never mints a cookie itself, so the URL is a genuine first-party session bound to this process.
 
-Base URL resolution prefers `webApp.getAdvertisedUrl()` (respects `--public-url` and mounts), then `webServer.getOrigin()`, then protocol plus loopback port. Every call re-reads the live value, so random Desktop ports and restarted tokens need no cache.
+Base URL resolution prefers `webApp.getAdvertisedUrl()` (respects `--public-url` and mounts), then `webServer.getOrigin()`, then protocol plus loopback port. Every call re-reads the live value, so random Desktop ports and restarted tokens need no cache. The token is attached only when that base is absolute `http` or `https`, has no username or password, and — unless the plugin config sets `allowPublic: true` — names a loopback host (`127.0.0.0/8`, `localhost`, or `::1`). The returned URL must be that same origin and carry exactly one `token`. An unacceptable base is refused before `authenticatedUrl` is called, and the error text never includes the URL.
 
 ## Install
 
@@ -50,7 +50,7 @@ git clone https://github.com/NingYuanLee/dsh-gui-auth-url.git
 dsh plugin --profile web add ./dsh-gui-auth-url
 ```
 
-npm is not published yet; GitHub is the only channel for now.
+The package is published on npm as `dsh-gui-auth-url`. GitHub is the source repository.
 
 Upgrading from the old name `dsh-gui-session` (0.1.x): the package name, Cordis row id and tool name all changed, so reinstall once:
 
@@ -82,7 +82,9 @@ Typical use: while debugging DeepSeek Harness itself, let the agent open the liv
 
 - The returned URL contains **this process's launch token**. It is a credential equivalent to a signed-in session and only works while the Host process is alive.
 - Do not write it to logs, commit it, or paste it into chats. Regenerate by calling the tool again; a restart invalidates it.
-- The plugin does not read `.credentials.yaml` and does not mint cookies; its permission boundary is exactly that of `dsh web` in a terminal.
+- A successful call still places the token in the session transcript and in later model requests. "Do not write it to logs" does not stop the host from storing the tool result. That is a wider audience than the one line `dsh web` prints in a terminal.
+- The plugin does not read `.credentials.yaml` and does not mint cookies.
+- Non-loopback URLs (`--public-url`, a LAN address, or `0.0.0.0`) are refused unless the plugin config is exactly `allowPublic: true`. That flag trusts the advertised host.
 - It is unrelated to [Discussion #8678](https://github.com/deepseek-ai/deepseek-harness/discussions/8678) (reading the signing secret inside a sandbox to forge cookies): this plugin never touches that secret.
 
 ## Compatibility
@@ -119,6 +121,16 @@ dsh plugin --profile <profile> revoke-version dsh-gui-auth-url@0.2.1
 **`EPERM: rename ... node_modules\dsh-gui-auth-url_tmp_*` on Windows.** Stop the DSH process using that profile, delete the stale `node_modules\dsh-gui-auth-url` directory, and retry. A running process locks the directory.
 
 **"This profile serves no Web GUI".** The plugin only returns a URL when the profile mounts `webApp` or `webServer` plus `connection`. Headless-style profiles have no GUI to open.
+
+**"refusing to attach the launch token to a non-loopback host".** The advertised URL is not loopback. The token is not returned. To allow that host, set this entry in the profile patch. A later patch replaces the whole `config` object, so keep any other keys you need in that same object:
+
+```yaml
+- id: gui-auth-url
+  config:
+    allowPublic: true
+```
+
+Leave `allowPublic` unset on a Desktop loopback profile. The flag trusts whatever `webApp.getAdvertisedUrl()` returns.
 
 ## Development
 

@@ -32,7 +32,7 @@ dsh web: http://127.0.0.1:3080/?token=...
 
 不碰 `$DSH_HOME/.credentials.yaml` 里的签名密钥，也不自己伪造 Cookie，所以拿到的是**真正的第一方会话**，与你在终端里手动打开的是同一个东西。
 
-基础地址按 `webApp.getAdvertisedUrl()`（尊重 `--public-url` 与挂载路径）→ `webServer.getOrigin()` → 协议 + 回环端口 顺序解析。每次调用都重新取当前值，桌面版随机端口与重启后的令牌变化都不需要缓存。
+基础地址按 `webApp.getAdvertisedUrl()`（尊重 `--public-url` 与挂载路径）→ `webServer.getOrigin()` → 协议 + 回环端口 顺序解析。每次调用都重新取当前值，桌面版随机端口与重启后的令牌变化都不需要缓存。只有基础地址是绝对的 `http` 或 `https`、不含用户名密码，并且主机是回环地址（`127.0.0.0/8`、`localhost` 或 `::1`）时，才会贴上令牌。插件配置显式 `allowPublic: true` 才允许非回环主机。返回的 URL 必须与该源一致，且恰好带一个 `token`。基础地址不合格时，在调用 `authenticatedUrl` 之前就拒绝，错误文本不包含 URL。
 
 ## Install
 
@@ -49,7 +49,7 @@ git clone https://github.com/NingYuanLee/dsh-gui-auth-url.git
 dsh plugin --profile web add ./dsh-gui-auth-url
 ```
 
-npm 尚未发布，目前只通过 GitHub 分发。
+npm 包名是 `dsh-gui-auth-url`。源码仓库在 GitHub。
 
 从旧名 `dsh-gui-session`（0.1.x）升级：包名、Cordis 条目 id 与工具名都变了，**必须重装一次**：
 
@@ -81,7 +81,9 @@ dsh plugin --profile <name> add github:NingYuanLee/dsh-gui-auth-url
 
 - 返回的 URL 含**本进程的启动令牌**，等价于一次已登录会话的凭据，只在 Host 进程存活期间有效。
 - 不要写入日志、提交到仓库或发到聊天里；需要时重新调用工具，重启即失效。
-- 插件不读取 `.credentials.yaml`，也不生成 Cookie；权限边界与你在终端里执行 `dsh web` 完全一致。
+- 调用成功仍会把令牌写入会话，并在后续模型请求里送出。「不要写入日志」约束不了 Host 自己落盘。这比终端里 `dsh web` 打印一次的读者范围更大。
+- 插件不读取 `.credentials.yaml`，也不生成 Cookie。
+- 非回环地址（`--public-url`、局域网地址或 `0.0.0.0`）默认拒绝，除非插件配置恰好是 `allowPublic: true`。打开后会信任广告出来的主机。
 - 与 [Discussion #8678](https://github.com/deepseek-ai/deepseek-harness/discussions/8678) 描述的问题（沙箱内可读签名密钥并伪造 Cookie）**无关**：本插件不接触该密钥。
 
 ## Compatibility
@@ -118,6 +120,16 @@ dsh plugin --profile <profile> revoke-version dsh-gui-auth-url@0.2.1
 **Windows 报 `EPERM: rename ... node_modules\dsh-gui-auth-url_tmp_*`？** 先停掉用该 profile 的 DSH 进程，删掉残留的 `node_modules\dsh-gui-auth-url` 目录后重试；运行中的进程会锁目录。
 
 **报“This profile serves no Web GUI”。** 只有 profile 挂载了 `webApp` 或 `webServer` 以及 `connection` 时才有地址可返回；headless 类 profile 没有 GUI 可开。
+
+**报 “refusing to attach the launch token to a non-loopback host”。** 广告地址不是回环地址，令牌不会返回。若确实要允许该主机，在 profile 补丁里写下面这项。后写的补丁会整段替换 `config`，其他键要放在同一个对象里：
+
+```yaml
+- id: gui-auth-url
+  config:
+    allowPublic: true
+```
+
+桌面版回环地址不要设置 `allowPublic`。打开后会信任 `webApp.getAdvertisedUrl()` 返回的任意主机。
 
 ## Development
 

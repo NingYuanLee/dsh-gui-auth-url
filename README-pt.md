@@ -23,7 +23,7 @@ Abrir o endereço sem token retorna 401. A edição Desktop inicia seu próprio 
 
 O plugin roda dentro do processo Host e chama a API pública oficial `connection.authenticatedUrl(baseUrl)` — a mesma que `dsh web` usa para montar a URL que imprime — devolvendo o resultado como resultado da ferramenta. Ele não lê o segredo de assinatura de cookies em `$DSH_HOME/.credentials.yaml` nem cria cookies próprios, então a URL é uma sessão de primeira parte real, vinculada a este processo.
 
-A base é resolvida com `webApp.getAdvertisedUrl()`, depois `webServer.getOrigin()` e, por fim, protocolo mais porta de loopback.
+A base é resolvida com `webApp.getAdvertisedUrl()`, depois `webServer.getOrigin()` e, por fim, protocolo mais porta de loopback. O token só é anexado se a base for `http` ou `https` absoluta, sem usuário nem senha, e o host for loopback (`127.0.0.0/8`, `localhost` ou `::1`), a menos que a config do plugin seja exatamente `allowPublic: true`. A URL devolvida precisa ter a mesma origem e exatamente um `token`. Uma base inválida é recusada antes de `authenticatedUrl`, e o erro não inclui a URL.
 
 ## Install
 
@@ -40,7 +40,7 @@ git clone https://github.com/NingYuanLee/dsh-gui-auth-url.git
 dsh plugin --profile web add ./dsh-gui-auth-url
 ```
 
-O npm ainda não foi publicado; o GitHub é o único canal por enquanto.
+O pacote está publicado no npm como `dsh-gui-auth-url`. O GitHub é o repositório de origem.
 
 Se você vem do nome antigo `dsh-gui-session` (0.1.x), reinstale: pacote, linha do Cordis e nome da ferramenta mudaram.
 
@@ -65,7 +65,9 @@ O modelo vê o texto de `url`; os demais campos ficam para chamadas programátic
 
 - A URL contém o token de inicialização deste processo: é uma credencial equivalente a uma sessão autenticada e só funciona enquanto o Host estiver vivo.
 - Não grave em logs, não faça commit e não cole em conversas; chame a ferramenta de novo para obter outra.
-- O plugin não lê `.credentials.yaml` nem cria cookies; seu limite de permissão é o mesmo de `dsh web` em um terminal.
+- Uma chamada bem-sucedida ainda grava o token na transcrição da sessão e nos pedidos seguintes ao modelo. «Não grave em logs» não impede o host de armazenar o resultado.
+- O plugin não lê `.credentials.yaml` nem cria cookies.
+- URLs fora do loopback (`--public-url`, um endereço de LAN ou `0.0.0.0`) são recusadas, a menos que a config seja exatamente `allowPublic: true`.
 - Não tem relação com [Discussion #8678](https://github.com/deepseek-ai/deepseek-harness/discussions/8678) (forjar cookies dentro de um sandbox): este plugin nunca toca nesse segredo.
 
 ## Compatibility

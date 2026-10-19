@@ -81,3 +81,106 @@ test('a real URL from connection carries exactly one token parameter', () => {
 	const parsed = new URL(resolveGuiAuthUrl(ctx).url);
 	assert.deepEqual(parsed.searchParams.getAll('token'), ['abc']);
 });
+
+/** Assert a refusal whose message does not contain a URL or a token. */
+function assertRefusal(fn, pattern) {
+	assert.throws(fn, (error) => {
+		assert.match(error.message, pattern);
+		assert.equal(error.message.includes('token='), false);
+		assert.equal(error.message.includes('super-secret'), false);
+		assert.equal(error.message.includes('://'), false);
+		return true;
+	});
+}
+
+test('accepts localhost and IPv6 loopback without allowPublic', () => {
+	for (const baseUrl of ['http://localhost:3080/', 'http://[::1]:62924/']) {
+		const ctx = contextOf({
+			webApp: { getAdvertisedUrl: () => baseUrl },
+			connection: connectionWith(),
+		});
+		const session = resolveGuiAuthUrl(ctx);
+		assert.equal(new URL(session.url).searchParams.get('token'), 'launch-token');
+		assert.equal(session.secure, false);
+	}
+});
+
+test('rejects a non-http base before asking the Host for a token', () => {
+	let called = false;
+	const ctx = contextOf({
+		webApp: { getAdvertisedUrl: () => 'javascript:alert(1)' },
+		connection: { authenticatedUrl: () => { called = true; return 'http://127.0.0.1/?token=super-secret'; } },
+	});
+	assertRefusal(() => resolveGuiAuthUrl(ctx), /must be http or https/u);
+	assert.equal(called, false);
+});
+
+test('rejects credentials in the base URL before asking for a token', () => {
+	let called = false;
+	const ctx = contextOf({
+		webApp: { getAdvertisedUrl: () => 'http://127.0.0.1:3080@evil.example/' },
+		connection: { authenticatedUrl: () => { called = true; return 'http://evil.example/?token=super-secret'; } },
+	});
+	assertRefusal(() => resolveGuiAuthUrl(ctx), /must not include credentials/u);
+	assert.equal(called, false);
+});
+
+test('refuses a public advertised host unless allowPublic is exactly true', () => {
+	let called = false;
+	const ctx = contextOf({
+		webApp: { getAdvertisedUrl: () => 'https://gui.example.com/prefix/' },
+		connection: {
+			authenticatedUrl: (baseUrl) => {
+				called = true;
+				const url = new URL(baseUrl);
+				url.searchParams.set('token', 'launch-token');
+				return url.href;
+			},
+		},
+	});
+	assertRefusal(() => resolveGuiAuthUrl(ctx), /non-loopback host/u);
+	assertRefusal(() => resolveGuiAuthUrl(ctx, { allowPublic: 'true' }), /non-loopback host/u);
+	assert.equal(called, false);
+	const session = resolveGuiAuthUrl(ctx, { allowPublic: true });
+	assert.equal(session.url, 'https://gui.example.com/prefix/?token=launch-token');
+	assert.equal(session.secure, true);
+	assert.equal(called, true);
+});
+
+test('refuses a wildcard or LAN listener by default', () => {
+	for (const origin of ['http://0.0.0.0:3080', 'http://192.168.1.20:3080']) {
+		const ctx = contextOf({
+			webServer: { getOrigin: () => origin },
+			connection: connectionWith(),
+		});
+		assertRefusal(() => resolveGuiAuthUrl(ctx), /non-loopback host/u);
+	}
+});
+
+test('does not echo a token when the authenticated origin differs', () => {
+	const ctx = contextOf({
+		webServer: { getOrigin: () => 'http://127.0.0.1:62924' },
+		connection: { authenticatedUrl: () => 'https://evil.example/?token=super-secret' },
+	});
+	assertRefusal(() => resolveGuiAuthUrl(ctx), /origin does not match/u);
+});
+
+test('rejects a result that does not carry exactly one token', () => {
+	const missing = contextOf({
+		webServer: { getOrigin: () => 'http://127.0.0.1:62924' },
+		connection: { authenticatedUrl: (baseUrl) => baseUrl },
+	});
+	assertRefusal(() => resolveGuiAuthUrl(missing), /exactly one token/u);
+	const doubled = contextOf({
+		webServer: { getOrigin: () => 'http://127.0.0.1:62924' },
+		connection: {
+			authenticatedUrl: (baseUrl) => {
+				const url = new URL(baseUrl);
+				url.searchParams.append('token', 'one');
+				url.searchParams.append('token', 'two');
+				return url.href;
+			},
+		},
+	});
+	assertRefusal(() => resolveGuiAuthUrl(doubled), /exactly one token/u);
+});

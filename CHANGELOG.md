@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.2
+
+- 返回带令牌的地址前，基础地址和结果都必须是 http(s)、不含用户信息；结果必须与基础源一致，且恰好一个非空 `token`。不合格的基础地址在调用 `authenticatedUrl` 之前就拒绝，错误文本不包含 URL。
+- 非回环主机（`--public-url`、局域网地址、`0.0.0.0`）默认拒绝。需要时在 profile 补丁里把该条目的 `config.allowPublic` 设为 `true`；后写补丁会整段替换 `config`。
+- 文档写明：调用成功仍会把令牌送进会话和后续模型请求。
+
 对齐 DSH 官方插件基线：`engines.dsh` / `engines.node`、`@deepseek-ai/cordis` 与 `@deepseek-ai/dsh-tools` peer 范围统一为官方声明，`files` 纳入 `SECURITY.md`，README 兼容性表同步更新。
 
 ## 0.2.1
