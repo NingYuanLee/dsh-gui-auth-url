@@ -121,4 +121,3 @@ El plugin solo registra una herramienta; el disposer que devuelve `ctx.tools.reg
 - [Discussion #5828](https://github.com/deepseek-ai/deepseek-harness/discussions/5828) — petición de `--no-browser-auth`, no adoptada
 - [Discussion #9085](https://github.com/deepseek-ai/deepseek-harness/discussions/9085) — Desktop no obtiene una sesión válida
 - [Contrato oficial de connection](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/connection/README.md)
-- [Registro comunitario de plugins](https://dsplugin.app/)

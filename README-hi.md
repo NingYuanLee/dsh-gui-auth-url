@@ -121,4 +121,3 @@ scripts/           prepublishOnly और CI द्वारा उपयोग �
 - [Discussion #5828](https://github.com/deepseek-ai/deepseek-harness/discussions/5828) — `--no-browser-auth` का अनुरोध, स्वीकार नहीं हुआ
 - [Discussion #9085](https://github.com/deepseek-ai/deepseek-harness/discussions/9085) — Desktop को वैध सत्र नहीं मिलता
 - [आधिकारिक connection अनुबंध](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/connection/README.md)
-- [सामुदायिक प्लगइन रजिस्ट्री](https://dsplugin.app/)

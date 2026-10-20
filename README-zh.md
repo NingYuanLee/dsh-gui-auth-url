@@ -155,4 +155,3 @@ scripts/           prepublishOnly 与 CI 使用的 tarball 检查
 - [Discussion #5828](https://github.com/deepseek-ai/deepseek-harness/discussions/5828) — 请求 `--no-browser-auth`，未采纳
 - [Discussion #9085](https://github.com/deepseek-ai/deepseek-harness/discussions/9085) — 桌面版拿不到合法会话
 - [官方连接契约](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/client/connection/README.md)
-- [DeepSeek Harness 社区插件目录](https://dsplugin.app/) — 发现更多插件
