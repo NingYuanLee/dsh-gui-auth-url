@@ -63,16 +63,19 @@ test('a rejected Host call surfaces as a tool error, not a fake URL', async () =
 	await assert.rejects(() => ctx.registered[0].execute({}, { signal: undefined }), /connection service is unavailable/u);
 });
 
-test('config defaults to closed public host, browser open, API key shared and a 4-host cap', () => {
-	assert.deepEqual(Config['~standard'].validate(undefined).value, { allowPublic: false, openBrowser: true, shareApiKey: true, maxInstances: 4 });
-	assert.deepEqual(Config['~standard'].validate({}).value, { allowPublic: false, openBrowser: true, shareApiKey: true, maxInstances: 4 });
-	assert.deepEqual(Config['~standard'].validate({ allowPublic: true }).value, { allowPublic: true, openBrowser: true, shareApiKey: true, maxInstances: 4 });
-	assert.deepEqual(Config['~standard'].validate({ openBrowser: false }).value, { allowPublic: false, openBrowser: false, shareApiKey: true, maxInstances: 4 });
-	assert.deepEqual(Config['~standard'].validate({ shareApiKey: false }).value, { allowPublic: false, openBrowser: true, shareApiKey: false, maxInstances: 4 });
-	assert.deepEqual(Config['~standard'].validate({ maxInstances: 2 }).value, { allowPublic: false, openBrowser: true, shareApiKey: true, maxInstances: 2 });
+test('config defaults to closed public host, browser open, API key shared, installs allowed and a 4-host cap', () => {
+	const base = { allowPublic: false, openBrowser: true, shareApiKey: true, maxInstances: 4, allowInstall: true };
+	assert.deepEqual(Config['~standard'].validate(undefined).value, base);
+	assert.deepEqual(Config['~standard'].validate({}).value, base);
+	assert.deepEqual(Config['~standard'].validate({ allowPublic: true }).value, { ...base, allowPublic: true });
+	assert.deepEqual(Config['~standard'].validate({ openBrowser: false }).value, { ...base, openBrowser: false });
+	assert.deepEqual(Config['~standard'].validate({ shareApiKey: false }).value, { ...base, shareApiKey: false });
+	assert.deepEqual(Config['~standard'].validate({ maxInstances: 2 }).value, { ...base, maxInstances: 2 });
+	assert.deepEqual(Config['~standard'].validate({ allowInstall: false }).value, { ...base, allowInstall: false });
 	assert.ok(Config['~standard'].validate({ allowPublic: 'true' }).issues);
 	assert.ok(Config['~standard'].validate({ openBrowser: 'no' }).issues);
 	assert.ok(Config['~standard'].validate({ shareApiKey: 'yes' }).issues);
+	assert.ok(Config['~standard'].validate({ allowInstall: 'yes' }).issues);
 	assert.ok(Config['~standard'].validate({ maxInstances: 0 }).issues);
 	assert.ok(Config['~standard'].validate({ maxInstances: 1.5 }).issues);
 	assert.ok(Config['~standard'].validate({ maxInstances: '2' }).issues);
@@ -81,7 +84,7 @@ test('config defaults to closed public host, browser open, API key shared and a 
 	assert.ok(Config['~standard'].validate('nope').issues);
 });
 
-test('mounts the human /dsh-web command, the start tool and the restart tool when jobs exist', () => {
+test('mounts the human /dsh-web command and the four instance tools when jobs exist', () => {
 	const commands = [];
 	const ctx = {
 		...fakeContext(services()),
@@ -89,7 +92,13 @@ test('mounts the human /dsh-web command, the start tool and the restart tool whe
 		jobs: { start: () => 'web-gui-1', get: () => ({ status: 'running' }), kill: () => {}, wait: async () => ({}) },
 	};
 	apply(ctx, { openBrowser: false });
-	assert.deepEqual(ctx.registered.map((tool) => tool.name), ['gui_auth_url', 'dsh_web_start', 'dsh_web_restart']);
+	assert.deepEqual(ctx.registered.map((tool) => tool.name), [
+		'gui_auth_url',
+		'dsh_web_start',
+		'dsh_web_restart',
+		'dsh_web_stop',
+		'dsh_web_status',
+	]);
 	assert.deepEqual(commands.map((definition) => definition.name), ['dsh-web', 'web-gui']);
 });
 

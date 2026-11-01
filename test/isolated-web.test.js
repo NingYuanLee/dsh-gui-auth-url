@@ -4,13 +4,16 @@ import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { INSTANCE_PREFIX, ownerRecordPath } from '../src/instance-home.js';
 import {
 	HOME_PREFIX,
 	MARKER_FILENAME,
 	createIsolatedWebGui,
 	parseLaunchedUrl,
+	parseNetstatListeners,
 	resolveLauncher,
+	resolvePortOwnerFrom,
 	sweepStaleHomes,
 } from '../src/isolated-web.js';
 
@@ -362,7 +365,9 @@ test('a restart falls back to an OS-assigned port when the old one is unavailabl
 		const port = args[args.indexOf('--port') + 1];
 		process.nextTick(() => {
 			if (port !== '0') {
-				// The fixed port is taken: the host exits before announcing a URL.
+				// The fixed port is taken: the host reports the conflict and exits
+				// before announcing a URL.
+				child.stderr.emit('data', Buffer.from('Error: listen EADDRINUSE: address already in use 127.0.0.1:4123\n'));
 				child.exitCode = 1;
 				child.emit('exit', 1);
 				return;
@@ -386,6 +391,52 @@ test('a restart falls back to an OS-assigned port when the old one is unavailabl
 	assert.match(restarted.url, /:4503\//u, 'the fallback host listens on a new OS-assigned port');
 	assert.equal(calls.length, 3, 'one failed attempt on the old port, then a fresh one');
 	await gui.stop();
+});
+
+test('a restart never retries after an unconfirmed exit', async () => {
+	const calls = [];
+	const removed = [];
+	const root = await mkdtemp(join(tmpdir(), 'dsh-restart-'));
+	try {
+		const home = join(root, 'kept-home');
+		let phase = 0;
+		const spawn = () => {
+			phase += 1;
+			const child = fakeChild();
+			calls.push(child);
+			if (phase === 1) {
+				process.nextTick(() => {
+					child.stdout.emit('data', Buffer.from('dsh web: http://127.0.0.1:4123/?token=t\n'));
+				});
+			} else {
+				// The replacement host never announces, never exits and ignores kill.
+				child.kill = () => {};
+			}
+			return child;
+		};
+		const gui = createIsolatedWebGui({
+			jobs: fakeJobs(),
+			spawn,
+			launcher: { command: 'dsh', args: [], env: {} },
+			makeHome: async () => {
+				await mkdir(home, { recursive: true });
+				return home;
+			},
+			removeHome: async (path) => removed.push(path),
+			pollMs: 5,
+			startTimeoutMs: 30,
+			stopTimeoutMs: 50,
+			waitGone: async () => false,
+		});
+		await gui.ensure('session-1');
+		await assert.rejects(() => gui.restart('session-1'), /exit could not be confirmed/);
+		assert.equal(calls.length, 2, 'no second replacement is started after an unconfirmed exit');
+		assert.deepEqual(removed, [], 'the preserved home is not deleted');
+		assert.ok(existsSync(home), 'the home stays');
+		assert.equal(gui.status('session-1').home, home, 'the failed instance stays tracked');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
 });
 
 test('restart without a running instance is refused', async () => {
@@ -413,20 +464,96 @@ test('ensureOrRestart starts when absent and restarts in place when running', as
 	await gui.stop();
 });
 
-test('a real temporary home is created and removed on stop', async () => {
-	const calls = [];
-	const gui = createIsolatedWebGui({
-		jobs: fakeJobs(),
-		spawn: fakeSpawn(calls),
-		launcher: { command: 'dsh', args: [], env: {} },
-		pollMs: 5,
-	});
-	await gui.ensure('session-1');
-	const home = calls[0].options.env.DSH_HOME;
-	assert.ok(home.startsWith(join(tmpdir(), HOME_PREFIX)), 'home lives under the temp dir with our prefix');
-	assert.ok(existsSync(home), 'home exists while the instance runs');
-	await gui.stop();
-	assert.equal(existsSync(home), false, 'home is gone after stop');
+test('a real temporary home is created under the plugin directory and removed on stop', async () => {
+	const previous = process.env.DSH_HOME;
+	const root = await mkdtemp(join(tmpdir(), 'dsh-home-'));
+	process.env.DSH_HOME = root;
+	try {
+		const calls = [];
+		const gui = createIsolatedWebGui({
+			jobs: fakeJobs(),
+			spawn: fakeSpawn(calls),
+			launcher: { command: 'dsh', args: [], env: {} },
+			pollMs: 5,
+		});
+		await gui.ensure('session-1');
+		const home = calls[0].options.env.DSH_HOME;
+		assert.ok(
+			home.startsWith(join(root, 'dsh-gui-auth-url', 'instances')),
+			'home lives in the plugin directory inside the Harness home',
+		);
+		assert.ok(existsSync(home), 'home exists while the instance runs');
+		await gui.stop();
+		assert.equal(existsSync(home), false, 'home is gone after stop');
+	} finally {
+		if (previous === undefined) delete process.env.DSH_HOME;
+		else process.env.DSH_HOME = previous;
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('the instances root is pinned at construction and survives a $DSH_HOME change', async () => {
+	const previous = process.env.DSH_HOME;
+	const firstHome = await mkdtemp(join(tmpdir(), 'dsh-home-a-'));
+	const secondHome = await mkdtemp(join(tmpdir(), 'dsh-home-b-'));
+	process.env.DSH_HOME = firstHome;
+	try {
+		const calls = [];
+		const gui = createIsolatedWebGui({
+			jobs: fakeJobs(),
+			spawn: fakeSpawn(calls),
+			launcher: { command: 'dsh', args: [], env: {} },
+			pollMs: 5,
+		});
+		await gui.ensure('session-1');
+		const first = calls[0].options.env.DSH_HOME;
+		assert.ok(first.startsWith(join(firstHome, 'dsh-gui-auth-url', 'instances')), 'the first home comes from the initial root');
+		await gui.stop();
+
+		process.env.DSH_HOME = secondHome;
+		await gui.ensure('session-1');
+		const second = calls[1].options.env.DSH_HOME;
+		assert.ok(
+			second.startsWith(join(firstHome, 'dsh-gui-auth-url', 'instances')),
+			'a changed $DSH_HOME does not move an already-pinned manager',
+		);
+		await gui.stop();
+	} finally {
+		if (previous === undefined) delete process.env.DSH_HOME;
+		else process.env.DSH_HOME = previous;
+		await rm(firstHome, { recursive: true, force: true });
+		await rm(secondHome, { recursive: true, force: true });
+	}
+});
+
+test('the instances home is captured at construction, before the first start', async () => {
+	const previous = process.env.DSH_HOME;
+	const configured = await mkdtemp(join(tmpdir(), 'dsh-home-configured-'));
+	const changed = await mkdtemp(join(tmpdir(), 'dsh-home-changed-'));
+	process.env.DSH_HOME = configured;
+	try {
+		const calls = [];
+		const gui = createIsolatedWebGui({
+			jobs: fakeJobs(),
+			spawn: fakeSpawn(calls),
+			launcher: { command: 'dsh', args: [], env: {} },
+			pollMs: 5,
+		});
+		// Changed after construction but before the first ensure: the captured
+		// configuration must win, otherwise creation and deletion could disagree.
+		process.env.DSH_HOME = changed;
+		await gui.ensure('session-1');
+		assert.ok(
+			calls[0].options.env.DSH_HOME.startsWith(join(configured, 'dsh-gui-auth-url', 'instances')),
+			'the root comes from the configuration captured at construction',
+		);
+		await gui.stop();
+	} finally {
+		if (previous === undefined) delete process.env.DSH_HOME;
+		else process.env.DSH_HOME = previous;
+		await rm(configured, { recursive: true, force: true });
+		await rm(changed, { recursive: true, force: true });
+	}
 });
 
 test('a resolved API key rides in the child environment only', async () => {
@@ -473,6 +600,7 @@ test('the startup sweep keeps a home whose host and Desktop process are alive', 
 		const killed = [];
 		const swept = await sweepStaleHomes({
 			tmpdir: root,
+			instancesDir: join(root, 'instances-new'),
 			isAlive: (pid) => pid === 100 || pid === 200,
 			kill: (pid) => killed.push(pid),
 			removeHome: async (path) => removed.push(path),
@@ -495,12 +623,15 @@ test('the startup sweep kills and removes a host whose Desktop process died', as
 		const verified = [];
 		const swept = await sweepStaleHomes({
 			tmpdir: root,
+			instancesDir: join(root, 'instances-new'),
 			isAlive: (pid) => pid === 100,
 			kill: (pid) => killed.push(pid),
 			verifyHost: async (marker) => {
 				verified.push(marker?.port);
 				return true;
 			},
+			resolvePortOwner: async () => 100,
+			waitGone: async () => true,
 			removeHome: async (path) => removed.push(path),
 		});
 		assert.deepEqual(swept, [home]);
@@ -520,14 +651,16 @@ test('the startup sweep removes an orphan home but leaves an unverifiable proces
 		const killed = [];
 		const swept = await sweepStaleHomes({
 			tmpdir: root,
+			instancesDir: join(root, 'instances-new'),
 			isAlive: (pid) => pid === 100,
 			kill: (pid) => killed.push(pid),
 			verifyHost: async () => false,
+			resolvePortOwner: async () => 100,
 			removeHome: async (path) => removed.push(path),
 		});
-		assert.deepEqual(swept, [home]);
+		assert.deepEqual(swept, [], 'a live process that does not answer as the recorded host is left alone');
 		assert.deepEqual(killed, [], 'a process that does not answer as the recorded DSH host is never killed');
-		assert.deepEqual(removed, [home]);
+		assert.deepEqual(removed, [], 'and its directory is not deleted either');
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -541,6 +674,7 @@ test('the startup sweep removes a home whose host already exited', async () => {
 		const killed = [];
 		const swept = await sweepStaleHomes({
 			tmpdir: root,
+			instancesDir: join(root, 'instances-new'),
 			isAlive: (pid) => pid === 200,
 			kill: (pid) => killed.push(pid),
 			removeHome: async (path) => removed.push(path),
@@ -560,9 +694,12 @@ test('the startup sweep reclaims a home left by a previous lifecycle of this pro
 		const killed = [];
 		const swept = await sweepStaleHomes({
 			tmpdir: root,
+			instancesDir: join(root, 'instances-new'),
 			isAlive: () => true,
 			kill: (pid) => killed.push(pid),
 			verifyHost: async () => true,
+			resolvePortOwner: async () => 100,
+			waitGone: async () => true,
 			removeHome: async () => {},
 		});
 		assert.deepEqual(swept, [home]);
@@ -580,6 +717,7 @@ test('the startup sweep leaves fresh marker-less homes and ignores foreign direc
 		const removed = [];
 		const swept = await sweepStaleHomes({
 			tmpdir: root,
+			instancesDir: join(root, 'instances-new'),
 			removeHome: async (path) => removed.push(path),
 			legacyMaxAgeMs: 60_000,
 		});
@@ -591,20 +729,516 @@ test('the startup sweep leaves fresh marker-less homes and ignores foreign direc
 	}
 });
 
-test('the startup sweep removes an old marker-less home', async () => {
+test('a cleanup that fails is not reported as removed', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'dsh-sweep-'));
+	try {
+		const home = await sweepHome(root, 'locked', { pid: 100, parentPid: 200 });
+		const swept = await sweepStaleHomes({
+			tmpdir: root,
+			instancesDir: join(root, 'instances-new'),
+			isAlive: (pid) => pid === 200,
+			removeHome: async () => {
+				throw new Error('locked');
+			},
+		});
+		assert.deepEqual(swept, [], 'a failed cleanup is not a cleanup');
+		assert.ok(existsSync(home), 'the directory is still there');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('port ownership is resolved for the probed endpoint, not just the port', () => {
+	const text = [
+		'  TCP    127.0.0.2:4321    0.0.0.0:0    LISTENING    100',
+		'  TCP    127.0.0.1:4321    0.0.0.0:0    LISTENING    4242',
+		'  TCP    127.0.0.1:5000    0.0.0.0:0    LISTENING    4243',
+		'  TCP    [::1]:4321    [::]:0    LISTENING    4244',
+	].join('\r\n');
+	const listeners = parseNetstatListeners(text);
+	assert.equal(resolvePortOwnerFrom(listeners, 4321, '127.0.0.1'), 4242, 'the probed endpoint decides');
+	assert.equal(resolvePortOwnerFrom(listeners, 4321, '127.0.0.2'), 100, 'a sibling address does not');
+	assert.equal(resolvePortOwnerFrom(listeners, 9999, '127.0.0.1'), undefined, 'an unused port has no owner');
+});
+
+test('ambiguous endpoint ownership is refused', () => {
+	const text = [
+		'  TCP    0.0.0.0:4321    0.0.0.0:0    LISTENING    100',
+		'  TCP    127.0.0.1:4321    0.0.0.0:0    LISTENING    4242',
+	].join('\n');
+	assert.equal(
+		resolvePortOwnerFrom(parseNetstatListeners(text), 4321, '127.0.0.1'),
+		undefined,
+		'two candidates mean no automatic kill',
+	);
+});
+
+test('stop keeps the home when the host does not confirm exit', async () => {
+	const calls = [];
+	const removed = [];
+	const jobs = fakeJobs();
+	const root = await mkdtemp(join(tmpdir(), 'dsh-stop-'));
+	try {
+		const gui = createIsolatedWebGui({
+			jobs,
+			spawn: fakeSpawn(calls),
+			launcher: { command: 'dsh', args: [], env: {} },
+			makeHome: async () => {
+				const home = join(root, 'stuck-home');
+				await mkdir(home, { recursive: true });
+				return home;
+			},
+			removeHome: async (path) => removed.push(path),
+			pollMs: 5,
+			stopTimeoutMs: 50,
+			waitGone: async () => false,
+		});
+		await gui.ensure('session-1');
+		const record = [...jobs.records.values()][0];
+		// The child neither exits nor becomes observable: cancel is a no-op and the
+		// exit promise never settles, so no proof of exit exists anywhere.
+		record.hooks.done = new Promise(() => {});
+		record.hooks.cancel = () => {};
+
+		await assert.rejects(() => gui.stop(), /did not confirm exit/);
+		assert.deepEqual(removed, [], 'an unconfirmed exit must not delete the home');
+		assert.ok(existsSync(join(root, 'stuck-home')), 'the home is still there');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('a spawn error while the host is still alive does not clean the home', async () => {
+	const calls = [];
+	const removed = [];
+	const jobs = fakeJobs();
+	const root = await mkdtemp(join(tmpdir(), 'dsh-err-'));
+	try {
+		const gui = createIsolatedWebGui({
+			jobs,
+			spawn: fakeSpawn(calls),
+			launcher: { command: 'dsh', args: [], env: {} },
+			makeHome: async () => {
+				const home = join(root, 'err-home');
+				await mkdir(home, { recursive: true });
+				return home;
+			},
+			removeHome: async (path) => removed.push(path),
+			pollMs: 5,
+			stopTimeoutMs: 50,
+			waitGone: async () => false,
+		});
+		await gui.ensure('session-1');
+		const record = [...jobs.records.values()][0];
+		record.hooks.cancel = () => {};
+		// The job settles as failed, but the process never emitted exit.
+		calls[0].child.emit('error', new Error('boom'));
+
+		await assert.rejects(() => gui.stop(), /did not confirm exit/);
+		assert.deepEqual(removed, [], 'a job error is not proof the process exited');
+		assert.ok(existsSync(join(root, 'err-home')), 'the home stays');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('a stop whose home cleanup fails is reported, not swallowed', async () => {
+	const calls = [];
+	const jobs = fakeJobs();
+	const root = await mkdtemp(join(tmpdir(), 'dsh-cleanfail-'));
+	try {
+		const gui = createIsolatedWebGui({
+			jobs,
+			spawn: fakeSpawn(calls),
+			launcher: { command: 'dsh', args: [], env: {} },
+			makeHome: async () => {
+				const home = join(root, 'home');
+				await mkdir(home, { recursive: true });
+				return home;
+			},
+			removeHome: async () => {
+				throw new Error('refusing to delete a directory without an owner marker');
+			},
+			pollMs: 5,
+		});
+		await gui.ensure('session-1');
+		await assert.rejects(() => gui.stop(), /temporary home could not be removed.*owner marker/s);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('a failed stop keeps the instance tracked and retryable', async () => {
+	const calls = [];
+	const removed = [];
+	const jobs = fakeJobs();
+	const root = await mkdtemp(join(tmpdir(), 'dsh-retry-'));
+	try {
+		const home = join(root, 'retry-home');
+		const gui = createIsolatedWebGui({
+			jobs,
+			spawn: fakeSpawn(calls),
+			launcher: { command: 'dsh', args: [], env: {} },
+			makeHome: async () => {
+				await mkdir(home, { recursive: true });
+				return home;
+			},
+			removeHome: async (path) => removed.push(path),
+			pollMs: 5,
+			stopTimeoutMs: 50,
+			waitGone: async () => false,
+		});
+		await gui.ensure('session-1');
+		const record = [...jobs.records.values()][0];
+		let resolveExit;
+		record.hooks.exited = new Promise((resolveStop) => {
+			resolveExit = resolveStop;
+		});
+		record.hooks.cancel = () => {};
+
+		await assert.rejects(() => gui.stop(), /did not confirm exit/);
+		const again = await gui.ensure('session-1');
+		assert.equal(again.reused, true, 'the live instance is still tracked');
+		assert.equal(calls.length, 1, 'no replacement instance is started');
+
+		resolveExit();
+		await gui.stop();
+		assert.deepEqual(removed, [home], 'once exit is proven the home is disposable');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('a start that fails before the URL keeps a still-live host and its home', async () => {
+	const removed = [];
+	const root = await mkdtemp(join(tmpdir(), 'dsh-start-'));
+	try {
+		const gui = createIsolatedWebGui({
+			jobs: fakeJobs(),
+			spawn: () => {
+				const child = fakeChild();
+				// Emit after the spawn helper has attached its listeners.
+				process.nextTick(() => child.emit('error', new Error('spawn failed')));
+				return child;
+			},
+			launcher: { command: 'dsh', args: [], env: {} },
+			makeHome: async () => {
+				const home = join(root, 'start-home');
+				await mkdir(home, { recursive: true });
+				return home;
+			},
+			removeHome: async (path) => removed.push(path),
+			pollMs: 5,
+			stopTimeoutMs: 50,
+			waitGone: async () => false,
+		});
+		await assert.rejects(() => gui.ensure('session-1'), /exit could not be confirmed/);
+		assert.deepEqual(removed, [], 'a job error is not proof the process exited');
+		assert.ok(existsSync(join(root, 'start-home')), 'the home is kept');
+		assert.equal(gui.status('session-1').home, join(root, 'start-home'), 'the instance stays tracked for a retry');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('a start timeout that cannot end the host keeps the home and the record', async () => {
+	const removed = [];
+	const root = await mkdtemp(join(tmpdir(), 'dsh-timeout-'));
+	try {
+		const child = fakeChild();
+		child.kill = () => {};
+		const gui = createIsolatedWebGui({
+			jobs: fakeJobs(),
+			spawn: () => child,
+			launcher: { command: 'dsh', args: [], env: {} },
+			makeHome: async () => {
+				const home = join(root, 'timeout-home');
+				await mkdir(home, { recursive: true });
+				return home;
+			},
+			removeHome: async (path) => removed.push(path),
+			pollMs: 5,
+			startTimeoutMs: 30,
+			stopTimeoutMs: 50,
+			waitGone: async () => false,
+		});
+		await assert.rejects(() => gui.ensure('session-1'), /did not announce a URL within 30 ms and its exit could not be confirmed/);
+		assert.deepEqual(removed, [], 'a kill request is not proof of exit');
+		assert.ok(existsSync(join(root, 'timeout-home')), 'the home is kept');
+		assert.equal(gui.status('session-1').home, join(root, 'timeout-home'), 'the instance stays tracked');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('the startup sweep never creates the instances root', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'dsh-sweep-'));
+	try {
+		const instances = join(root, 'not-there');
+		const swept = await sweepStaleHomes({ tmpdir: root, instancesDir: instances });
+		assert.deepEqual(swept, []);
+		assert.equal(existsSync(instances), false, 'a sweep must not write into the Harness home');
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('the startup sweep never signals a process whose owner marker is invalid', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'dsh-sweep-'));
+	try {
+		const instancesDir = join(root, 'instances-new');
+		const home = join(instancesDir, `${INSTANCE_PREFIX}bad-owner`);
+		await mkdir(home, { recursive: true });
+		await writeFile(join(home, MARKER_FILENAME), JSON.stringify({ pid: 100, parentPid: 999, port: 4321 }), 'utf8');
+		// A record that is not this plugin's format: ownership is unproven.
+		await mkdir(join(instancesDir, '.owner-records'), { recursive: true });
+		await writeFile(ownerRecordPath(instancesDir, home), JSON.stringify({ version: 99, plugin: 'other' }), 'utf8');
+
+		const killed = [];
+		const removed = [];
+		const swept = await sweepStaleHomes({
+			tmpdir: root,
+			instancesDir,
+			isAlive: (pid) => pid === 100,
+			kill: (pid) => killed.push(pid),
+			verifyHost: async () => true,
+			resolvePortOwner: async () => 100,
+			waitGone: async () => true,
+			removeHome: async (path) => removed.push(path),
+		});
+		assert.deepEqual(swept, []);
+		assert.deepEqual(killed, [], 'an unproven owner is never signalled');
+		assert.deepEqual(removed, []);
+		assert.ok(existsSync(home));
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('the startup sweep never signals a pid that does not own the recorded port', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'dsh-sweep-'));
+	try {
+		const instancesDir = join(root, 'instances-new');
+		const home = join(instancesDir, `${INSTANCE_PREFIX}recycled-pid`);
+		await mkdir(home, { recursive: true });
+		await writeFile(join(home, MARKER_FILENAME), JSON.stringify({ pid: 100, parentPid: 999, port: 4321 }), 'utf8');
+		await mkdir(join(instancesDir, '.owner-records'), { recursive: true });
+		await writeFile(
+			ownerRecordPath(instancesDir, home),
+			JSON.stringify({
+				version: 1,
+				plugin: 'dsh-gui-auth-url',
+				instanceId: `${INSTANCE_PREFIX}recycled-pid`,
+				token: 'token-0123456789abcdef',
+				home,
+				realHome: resolve(home),
+			}),
+			'utf8',
+		);
+
+		const killed = [];
+		const swept = await sweepStaleHomes({
+			tmpdir: root,
+			instancesDir,
+			isAlive: (pid) => pid === 100,
+			kill: (pid) => killed.push(pid),
+			verifyHost: async () => true,
+			resolvePortOwner: async () => 4242,
+			waitGone: async () => true,
+			removeHome: async () => {},
+		});
+		assert.deepEqual(swept, [], 'the port belongs to another process');
+		assert.deepEqual(killed, [], 'a pid that does not own the port is never signalled');
+		assert.ok(existsSync(home));
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('the startup sweep keeps the directory of a live host that does not exit', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'dsh-sweep-'));
+	try {
+		const home = await sweepHome(root, 'stubborn', { pid: 100, parentPid: 999 });
+		const removed = [];
+		const killed = [];
+		const swept = await sweepStaleHomes({
+			tmpdir: root,
+			instancesDir: join(root, 'instances-new'),
+			isAlive: (pid) => pid === 100,
+			kill: (pid) => killed.push(pid),
+			verifyHost: async () => true,
+			resolvePortOwner: async () => 100,
+			waitGone: async () => false,
+			removeHome: async (path) => removed.push(path),
+		});
+		assert.deepEqual(swept, [], 'a host that did not exit keeps its directory');
+		assert.deepEqual(killed, [100], 'the verified host is asked to stop');
+		assert.deepEqual(removed, [], 'but nothing is deleted while it is still alive');
+		assert.ok(existsSync(home));
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test('the startup sweep never deletes a marker-less home, however old', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'dsh-sweep-'));
 	try {
 		const home = await sweepHome(root, 'legacy-old', undefined);
 		const removed = [];
 		const swept = await sweepStaleHomes({
 			tmpdir: root,
+			instancesDir: join(root, 'instances-new'),
 			removeHome: async (path) => removed.push(path),
 			legacyMaxAgeMs: 0,
 			now: () => Date.now() + 1000,
 		});
-		assert.deepEqual(swept, [home]);
-		assert.deepEqual(removed, [home]);
+		assert.deepEqual(swept, [], 'age is not evidence of ownership');
+		assert.deepEqual(removed, []);
+		assert.ok(existsSync(home), 'the unprovable directory stays');
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+/** Spawn stand-in that answers `dsh plugin ... add` with an exit code and the host with a URL. */
+function fakeSpawnWithInstall(calls, { url = 'http://127.0.0.1:4123/?token=t', installCode = 0, installOutput = '' } = {}) {
+	return (command, args, options) => {
+		const child = fakeChild();
+		calls.push({ command, args, options, child });
+		process.nextTick(() => {
+			if (args.includes('plugin')) {
+				if (installOutput !== '') child.stderr.emit('data', Buffer.from(installOutput));
+				child.exitCode = installCode;
+				child.emit('exit', installCode);
+				return;
+			}
+			child.stdout.emit('data', Buffer.from(`dsh web: ${url}\n`));
+		});
+		return child;
+	};
+}
+
+test('launch options reach the spawned host and the reported facts', async () => {
+	const { gui, calls } = manager({ allowPublic: true });
+	const outcome = await gui.ensure('session-1', { host: '192.168.1.5', port: 51234 });
+	assert.equal(calls[0].args[calls[0].args.indexOf('--port') + 1], '51234', 'a requested port is honoured');
+	assert.deepEqual(calls[0].args.slice(-2), ['--host', '192.168.1.5']);
+	assert.equal(outcome.exposed, true);
+	assert.equal(typeof outcome.startedAt, 'number');
+	assert.deepEqual(outcome.install, []);
+	await gui.stop();
+});
+
+test('an exposure request is refused before anything is spawned when allowPublic is off', async () => {
+	const { gui, calls } = manager();
+	await assert.rejects(() => gui.ensure('session-1', { host: '192.168.1.5' }), /allowPublic: true/u);
+	assert.equal(calls.length, 0, 'no host is ever spawned for a refused request');
+});
+
+test('a profile that turns installs off refuses the install option', async () => {
+	const { gui, calls } = manager({ allowInstall: false });
+	await assert.rejects(() => gui.ensure('session-1', { install: ['github:you/plugin'] }), /install is disabled/u);
+	assert.equal(calls.length, 0);
+});
+
+test('installing happens before the host starts, inside the disposable profile', async () => {
+	const calls = [];
+	const gui = createIsolatedWebGui({
+		jobs: fakeJobs(),
+		spawn: fakeSpawnWithInstall(calls),
+		launcher: { command: 'dsh', args: [], env: {} },
+		pollMs: 5,
+		makeHome: async () => join(tmpdir(), `${HOME_PREFIX}install`),
+		removeHome: async () => {},
+	});
+	const outcome = await gui.ensure('session-1', { install: ['github:you/plugin'] });
+	const installCall = calls.find((call) => call.args.includes('plugin'));
+	assert.ok(installCall, 'the package manager ran');
+	assert.deepEqual(installCall.args, ['plugin', '--profile', 'web', 'add', 'github:you/plugin']);
+	assert.equal(installCall.options.env.DSH_HOME, join(tmpdir(), `${HOME_PREFIX}install`), 'the profile is the disposable one');
+	const hostCall = calls.find((call) => call.args.includes('--no-open'));
+	assert.ok(hostCall !== undefined, 'the host ran');
+	assert.ok(calls.indexOf(installCall) < calls.indexOf(hostCall), 'install precedes the host');
+	assert.deepEqual(outcome.install, ['github:you/plugin']);
+	await gui.stop();
+});
+
+test('a failed install removes the fresh home and never starts a host', async () => {
+	const calls = [];
+	const removed = [];
+	const gui = createIsolatedWebGui({
+		jobs: fakeJobs(),
+		spawn: fakeSpawnWithInstall(calls, { installCode: 1, installOutput: 'ERR_PNPM_NO_MATCHING_VERSION' }),
+		launcher: { command: 'dsh', args: [], env: {} },
+		pollMs: 5,
+		makeHome: async () => join(tmpdir(), `${HOME_PREFIX}installfail`),
+		removeHome: async (home) => removed.push(home),
+	});
+	await assert.rejects(
+		() => gui.ensure('session-1', { install: ['github:you/missing'] }),
+		/installing into the temporary profile failed \(exit code 1\)[\s\S]*ERR_PNPM_NO_MATCHING_VERSION/u,
+		'the package-manager output is reported',
+	);
+	assert.equal(calls.filter((call) => call.args.includes('--no-open')).length, 0, 'no host is started');
+	assert.deepEqual(removed, [join(tmpdir(), `${HOME_PREFIX}installfail`)]);
+});
+
+test('a restart keeps the launch configuration and does not re-run the package manager', async () => {
+	const calls = [];
+	const gui = createIsolatedWebGui({
+		jobs: fakeJobs(),
+		spawn: fakeSpawnWithInstall(calls),
+		launcher: { command: 'dsh', args: [], env: {} },
+		pollMs: 5,
+		allowPublic: true,
+		makeHome: async () => join(tmpdir(), `${HOME_PREFIX}restartopts`),
+		removeHome: async () => {},
+	});
+	await gui.ensure('session-1', { install: ['github:you/plugin'], host: '192.168.1.5' });
+	const installsBefore = calls.filter((call) => call.args.includes('plugin')).length;
+	const restarted = await gui.restart('session-1');
+	assert.equal(restarted.portKept, true);
+	const hostCalls = calls.filter((call) => call.args.includes('--no-open'));
+	assert.deepEqual(hostCalls.at(-1).args.slice(-2), ['--host', '192.168.1.5'], 'the bind address survives');
+	assert.equal(calls.filter((call) => call.args.includes('plugin')).length, installsBefore, 'nothing is reinstalled');
+	assert.equal(restarted.exposed, true);
+	await gui.stop();
+});
+
+test('a request with real launch options reconfigures a running instance', async () => {
+	const { gui, calls, jobs } = manager({ allowPublic: true });
+	await gui.ensure('session-1');
+	const first = [...jobs.records.values()][0];
+	const outcome = await gui.ensure('session-1', { host: '192.168.1.5' });
+	assert.equal(outcome.reused, false, 'a reconfigured host is not handed back as a plain reuse');
+	assert.equal(calls.length, 2);
+	assert.deepEqual(calls[1].args.slice(-2), ['--host', '192.168.1.5']);
+	assert.equal(jobs.records.get(first.id).status, 'killed');
+	await gui.stop();
+});
+
+test('status reports nothing running before the first start', () => {
+	const { gui } = manager();
+	assert.throws(() => gui.status(undefined), /session-bound owner/u);
+	assert.deepEqual(gui.status('session-1'), { running: false, runningCount: 0, maxInstances: 4 });
+});
+
+test('status reports the running instance, its facts and the global counters', async () => {
+	const { gui } = manager({ allowPublic: true });
+	await gui.ensure('session-1', { host: '192.168.1.5' });
+	const status = gui.status('session-1');
+	assert.equal(status.running, true);
+	assert.equal(status.jobStatus, 'running');
+	assert.equal(status.url, 'http://127.0.0.1:4123/?token=t');
+	assert.equal(status.port, 4123);
+	assert.equal(status.exposed, true);
+	assert.equal(status.sharedKey, false);
+	assert.equal(status.runningCount, 1);
+	assert.equal(status.maxInstances, 4);
+	assert.ok(status.home.startsWith(join(tmpdir(), HOME_PREFIX)));
+	assert.equal(typeof status.startedAt, 'number');
+
+	await gui.stop('session-1');
+	assert.equal(gui.status('session-1').running, false, 'a stopped instance is not running');
+	assert.equal(gui.status('session-1').runningCount, 0);
 });

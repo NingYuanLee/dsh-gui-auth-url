@@ -10,7 +10,7 @@
 
 把当前运行中的 DeepSeek Harness Web GUI 的**合法带 token 地址**暴露成一个 agent 工具，让浏览器自动化和脚本能真正打开 GUI，而不是撞上 `401 dsh web authentication required`。
 
-它还提供**临时鉴权 DSH Web**：agent（`dsh_web_start` / `dsh_web_restart` 工具）或人（`/dsh-web` 命令：没有实例就启动，有实例就原地重启）都能按会话拉起一个独立进程 + 临时 `DSH_HOME` + 独立端口的实例，用来验证新插件、新界面或新 profile 而不碰桌面端正在使用的会话；每个会话各一份，互不干扰，且实例只能以“绑定到会话的受管后台任务”形式存在。
+它还提供**临时鉴权 DSH Web**：agent（`dsh_web_start` / `dsh_web_restart` / `dsh_web_stop` / `dsh_web_status` 工具）或人（`/dsh-web` 命令：没有实例就启动，有实例就原地重启）都能按会话拉起一个独立进程 + 临时 `DSH_HOME` + 独立端口的实例，用来验证新插件、新界面或新 profile 而不碰桌面端正在使用的会话；每个会话各一份，互不干扰，且实例只能以“绑定到会话的受管后台任务”形式存在。
 
 ## The problem
 
@@ -62,7 +62,7 @@ dsh plugin --profile <name> add github:NingYuanLee/dsh-gui-auth-url
 
 ## Usage
 
-插件注册一个无参数的 agent 工具 `gui_auth_url`、两个实例工具 `dsh_web_start` / `dsh_web_restart`，以及一条人类命令 `/dsh-web`（旧名 `/web-gui` 保留为可执行别名）。工具返回：
+插件注册一个无参数的 agent 工具 `gui_auth_url`、四个实例工具 `dsh_web_start` / `dsh_web_restart` / `dsh_web_stop` / `dsh_web_status`，以及一条人类命令 `/dsh-web`（旧名 `/web-gui` 保留为可执行别名）。工具返回：
 
 ```json
 {
@@ -89,7 +89,38 @@ dsh plugin --profile <name> add github:NingYuanLee/dsh-gui-auth-url
 
 为防止残留堆积，每个临时 home 会写入 `instance.json`（host PID、Desktop PID、端口）。插件启动时扫描 `%TEMP%/dsh-web-gui-*`，清理宿主或父进程已死的 home，并在该端口仍返回 DSH 的 401 签名时结束遗留进程；无标记的旧版目录只清理超过 24 小时的。停止实例时 Windows 上按进程树结束，避免子进程残留。
 
-给 agent 的入口有三个，职责不同、别混用：`gui_auth_url` 返回**当前桌面进程**的地址（就是你正看着的那个 GUI，只读、无副作用）；`dsh_web_start` 起或复用**临时实例**并返回它的 `url` 与 `jobId`（不打开浏览器）；`dsh_web_restart` 原地重启那个实例并保留临时目录。停止走「后台任务」列表或 `job_kill`；三者共用同一份 `shareApiKey`、归属与清理规则。
+**启动参数。** `dsh_web_start` 的启动参数都可选，一律透传给被拉起的 `dsh web`；每一条都有代价：
+
+- `install`（string[]）：包 spec 列表，在宿主启动前用 `dsh plugin --profile web add` 装进临时 `DSH_HOME`。这是把本地或已发布的插件放进一次性实例试用的方式。**代价：** pnpm 会以你的用户身份执行这些包的 lifecycle 脚本（`postinstall` 等），所以只写你愿意运行的包；安装失败会删掉临时目录并返回错误，错误里带安装输出的尾部，不会留下半成品实例。默认允许；在 profile 补丁里设 `allowInstall: false` 可拒绝所有带 `install` 的请求。
+- `host`（string）：绑定地址。必须是具体的 IPv4/IPv6 字面量——`0.0.0.0`、`::`、`*` 一律拒绝，因为通配会把实例发布到所有网卡。仅在插件配置恰好 `allowPublic: true` 时接受。
+- `public_url`（string）：对外广告的根 URL，必须是绝对 `http`/`https`、不含用户名密码。同样受 `allowPublic` 门禁。
+- `tls_cert` 与 `tls_key`（string）：PEM 证书与私钥路径，必须成对提供。同样受 `allowPublic` 门禁。TLS 只加密传输，不会让打印出来的 token 变得可以随便外传。
+- `trusted_host`（string[]）：`/api` 信任栅栏额外接受的 authority。同样受 `allowPublic` 门禁。
+- `port`（integer，0–65535）：监听端口，`0` 交给系统分配。`dsh_web_restart` 故意不收 `port`——重启沿用原端口，已打开的页面才能继续用。
+
+打开 `allowPublic` 是唯一一个会扩大影响面的开关：实例从此在回环之外可达，而挡在对方与一个已登录会话之间的只有那个 token。回环的桌面 profile 上不要设它。
+
+**完整闭环：本地插件放进一次性实例试用。** 让「装进去 → 重启生效 → 验证 → 清理」成为一个干净循环的，是 `dsh_web_restart` 也接受 `install`：
+
+```text
+1. dsh_web_start()
+   -> { "url": "http://127.0.0.1:49312/?token=...", "jobId": "job-..." }
+
+2. dsh_web_restart({ "install": ["D:/tools/dsh-plugins/dsh-gui-auth-url"] })
+   先在该临时 DSH_HOME 里执行 `dsh plugin --profile web add`，
+   再换掉宿主进程：端口尽量沿用，启动令牌换新。
+
+3. 验证：用 navigate_page/curl 打开返回的 url，或调用
+   dsh_web_status() -> { "running": true, "install": [...], "exposed": false, ... }
+   插件的工具与命令只存在于这个实例里。
+
+4. dsh_web_stop() -> { "stopped": true }
+   结束进程树、删除临时目录；桌面 profile 自始至终没被动过。
+```
+
+全新实例可以直接 `dsh_web_start({ "install": [...] })`，把第 1、2 步合成一次调用。两种写法落点都在 `%TEMP%/dsh-web-gui-*`；重启会保留该目录，所以装进去的东西还在。
+
+给 agent 的入口有五个，职责不同、别混用：`gui_auth_url` 返回**当前桌面进程**的地址（就是你正看着的那个 GUI，只读、无副作用）；`dsh_web_start` 起或复用本会话的**临时实例**，返回 `url` 与 `jobId`（不打开浏览器）；`dsh_web_restart` 原地替换宿主进程并保留临时目录；`dsh_web_stop` 停止实例、删除临时目录，返回 `{ stopped }`；`dsh_web_status` 只读汇报本会话实例——`running`，有实例时还有 `url`、`jobId`、`startedAt`、`home`、`port`、`sharedKey`、`install`、`exposed`，以及 `runningCount` 与 `maxInstances`。停止走「后台任务」列表、`job_kill` 或 `dsh_web_stop` 都行，结果状态一致。
 
 空白会话（还没有任何消息）里不能执行 `/dsh-web`：DSH 会把这种会话从会话列表里过滤掉，切换后会话消失，实例就会失去顶部的停止入口。命令会直接返回提示，要求先发一条消息或切换到已有会话。这条提示显示在输入框上方的通知区——空白会话不渲染对话记录，而命令结果本来只在对话记录里显示，所以插件在客户端额外补了一次。
 
@@ -102,6 +133,10 @@ dsh plugin --profile <name> add github:NingYuanLee/dsh-gui-auth-url
 - 调用成功仍会把令牌写入会话，并在后续模型请求里送出。「不要写入日志」约束不了 Host 自己落盘。这比终端里 `dsh web` 打印一次的读者范围更大。
 - 插件不读取 `.credentials.yaml`，也不生成 Cookie。
 - 非回环地址（`--public-url`、局域网地址或 `0.0.0.0`）默认拒绝，除非插件配置恰好是 `allowPublic: true`。打开后会信任广告出来的主机。
+- 隔离实例是真子进程：`dsh_web_start` 拉起的是一整个 `dsh web`，有它自己的监听端口。默认 `shareApiKey: true` 时它通过环境变量拿到本进程的 `DEEPSEEK_API_KEY`：不写入临时目录、不打印，但同用户的其他进程能读到，且每一轮都消耗同一账号配额。要关闭共享设 `shareApiKey: false`。
+- `install` 会以你的用户身份执行第三方包的 lifecycle 脚本。spec 做了字符白名单校验（不允许空格、引号与 `&|<>^`），这挡住了往安装命令里注入 shell 元字符，但不判断一个格式合法的包是否恶意。`allowInstall: false` 直接拒绝安装请求。
+- 暴露类参数（`host`、`public_url`、`tls_cert`/`tls_key`、`trusted_host`）只在 `allowPublic: true` 时被接受，且 `host` 连通配地址都拒绝。打开后，可达的网络就是该 token 的读者范围，TLS 不会缩小它。
+- 停止时结束整个进程树（Windows 上 `taskkill /T`）并删除临时目录；插件启动时的清扫只在记录端口仍返回 DSH 的 401 签名时才结束遗留进程，所以 PID 复用不会误杀。
 - 与 [Discussion #8678](https://github.com/deepseek-ai/deepseek-harness/discussions/8678) 描述的问题（沙箱内可读签名密钥并伪造 Cookie）**无关**：本插件不接触该密钥。
 
 ## Compatibility
@@ -149,6 +184,16 @@ dsh plugin --profile <profile> revoke-version dsh-gui-auth-url@0.2.1
 
 桌面版回环地址不要设置 `allowPublic`。打开后会信任 `webApp.getAdvertisedUrl()` 返回的任意主机。
 
+**`dsh_web_start` 拒绝 `install`。** 要么 profile 配置是 `allowInstall: false`，要么某个 spec 含 `[A-Za-z0-9@._~:/\\+=%-]` 之外的字符（空格、引号、`&|<>^`）。改正 spec，或确实要用就在 profile 补丁里重新打开安装。
+
+**装在实例里失败、也没有实例起来。** 这是预期行为：临时目录被删掉，错误里带安装输出的尾部。先读那段尾部——通常是版本不匹配（`engines.dsh`，见上面的豁免流程）或 registry/网络问题。不会留下装了一半的状态要你收拾。
+
+**`dsh_web_start` 拒绝 `host` / `public_url` / `tls_cert` / `tls_key` / `trusted_host`。** 暴露类参数要求配置恰好是 `allowPublic: true`；即使打开了，通配地址（`0.0.0.0`、`::`、`*`）仍被拒绝——写具体地址，反向代理或隧道放在插件之外。
+
+**重启后旧链接失效。** 只有端口会尽量沿用（且仅在未被占用时）；启动令牌每次启动、重启都换新，旧链接会 401。用 `dsh_web_status` 取当前的 `url`。
+
+**`dsh_web_stop` 说没停任何东西。** 这个会话那时已经没有实例——可能已经停过、在后台任务列表里取消过，或被 `job_kill` 结束了。先 `dsh_web_status` 确认，再判断是不是失败。
+
 ## Development
 
 ```bash
@@ -162,7 +207,7 @@ src/auth-url.js     纯函数：base URL 解析 + 调 Host 取会话（可单测
 src/api-key.js      隔离实例的 DEEPSEEK_API_KEY 解析
 src/command.js      /dsh-web 命令：启动/自动重启与打开浏览器
 src/isolated-web.js 按会话的实例管理器（spawn、restart、stop、清扫）
-src/isolated-tool.js agent 工具 dsh_web_start / dsh_web_restart
+src/isolated-tool.js agent 工具 dsh_web_start / dsh_web_restart / dsh_web_stop / dsh_web_status
 src/index.js        Cordis 入口：gui_auth_url 与实例相关表面
 client.js           浏览器端：命令标签/图标、隐藏旧别名、空白会话提示
 locale/             展示元数据（en、zh、es、pt、hi）
@@ -170,7 +215,7 @@ test/               node:test 用例，含打包不变量
 scripts/            prepublishOnly 与 CI 使用的 tarball 检查
 ```
 
-插件注册一个只读工具、两个实例工具和一条人类命令；`ctx.tools.register` 返回的 disposer 由 Cordis 持有，卸载或热重载时会干净移除。
+插件注册一个只读工具、四个实例工具和一条人类命令；`ctx.tools.register` 返回的 disposer 由 Cordis 持有，卸载或热重载时会干净移除。
 
 推送 `v*` 标签会触发 `.github/workflows/publish.yml`；仓库 Secret 未配置 `NPM_TOKEN` 时该工作流跳过发布并在日志里说明。手动发布（上面的流程）仍然有效。
 

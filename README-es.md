@@ -71,7 +71,39 @@ Se ejecutan como máximo 4 instancias a la vez (ajustable con `maxInstances` en 
 
 Para evitar restos acumulados, cada home temporal registra `instance.json` (PID del host, PID del Desktop, puerto). Al arrancar, el plugin escanea `%TEMP%/dsh-web-gui-*`, borra los homes cuyo host o proceso Desktop ya no existe y solo termina un proceso residual cuando su puerto sigue devolviendo la firma 401 de DSH; los directorios antiguos sin marcador se limpian pasadas 24 horas. Al detener, en Windows se termina el árbol de procesos para no dejar hijos.
 
-Para el agente hay tres entradas, con papeles distintos: `gui_auth_url` devuelve la dirección del **proceso de escritorio actual** (la GUI que estás viendo; solo lectura, sin efectos); `dsh_web_start` arranca o reutiliza una **instancia temporal** y devuelve su `url` y `jobId` (sin abrir navegador); `dsh_web_restart` reinicia esa instancia en el sitio conservando el directorio temporal. Para detenerla usa la lista de tareas o `job_kill`; las tres comparten `shareApiKey`, propiedad y reglas de limpieza.
+**Argumentos de arranque.** Todos son opcionales y se pasan tal cual al `dsh web` que se lanza. Cada uno tiene un precio:
+
+- `install` (string[]): specs de paquetes que se instalan en el `DSH_HOME` temporal con `dsh plugin --profile web add` antes de arrancar el host. Así se prueba un complemento local o publicado dentro de una instancia desechable. **Coste:** pnpm ejecuta los scripts de ciclo de vida (`postinstall`, etc.) de esos paquetes con tu usuario, así que nombra solo paquetes que estés dispuesto a ejecutar; si la instalación falla se borra el directorio temporal y se devuelve un error con la cola de la salida de instalación, sin dejar una instancia a medias. Está permitido por defecto; `allowInstall: false` en el parche del perfil rechaza toda petición que lleve `install`.
+- `host` (string): dirección de escucha. Debe ser un literal IPv4 o IPv6 concreto: `0.0.0.0`, `::` y `*` se rechazan, porque un comodín publica la instancia en todas las interfaces. Solo se acepta con `allowPublic: true`.
+- `public_url` (string): URL raíz anunciada, absoluta `http`/`https`, sin usuario ni contraseña. Misma puerta `allowPublic`.
+- `tls_cert` y `tls_key` (string): rutas PEM del certificado y la clave; deben ir en pareja. Misma puerta. TLS cifra el transporte; no hace que el token impreso sea seguro de compartir.
+- `trusted_host` (string[]): autoridades extra aceptadas por la barrera de confianza de `/api`. Misma puerta.
+- `port` (integer, 0–65535): puerto de escucha; `0` lo asigna el sistema. `dsh_web_restart` no acepta `port` a propósito: un reinicio reutiliza el puerto para que una pestaña abierta siga funcionando.
+
+Activar `allowPublic` es el único ajuste que amplía el radio de daño: la instancia pasa a responder fuera del loopback y el token es lo único que separa a esa red de una sesión autenticada. Déjalo sin definir en un perfil de escritorio con loopback.
+
+**Ciclo completo: probar un complemento local en una instancia desechable.** Que «instalar → reiniciar para aplicarlo → verificar → limpiar» sea un ciclo limpio se debe a que `dsh_web_restart` también acepta `install`:
+
+```text
+1. dsh_web_start()
+   -> { "url": "http://127.0.0.1:49312/?token=...", "jobId": "job-..." }
+
+2. dsh_web_restart({ "install": ["D:/tools/dsh-plugins/dsh-gui-auth-url"] })
+   instala con `dsh plugin --profile web add` en el DSH_HOME temporal
+   y luego sustituye el host: mismo puerto si está libre, token nuevo.
+
+3. Verifica: abre la url devuelta con navigate_page/curl, o llama a
+   dsh_web_status() -> { "running": true, "install": [...], "exposed": false, ... }
+   La herramienta y el comando del complemento existen solo en esa instancia.
+
+4. dsh_web_stop() -> { "stopped": true }
+   termina el árbol de procesos y borra el directorio temporal;
+   el perfil de escritorio no se tocó en ningún momento.
+```
+
+Para una instancia nueva, `dsh_web_start({ "install": [...] })` funde los pasos 1 y 2 en una sola llamada. En ambos casos todo cae en `%TEMP%/dsh-web-gui-*`, y el reinicio conserva ese directorio, así que lo instalado sigue ahí.
+
+Para el agente hay cinco entradas y no son intercambiables: `gui_auth_url` devuelve la dirección del **proceso de escritorio actual** (la GUI que estás viendo; solo lectura, sin efectos); `dsh_web_start` arranca o reutiliza la **instancia temporal** de esta sesión y devuelve su `url` y `jobId` (sin abrir navegador); `dsh_web_restart` sustituye ese host en el sitio conservando el directorio temporal; `dsh_web_stop` la detiene, borra el directorio temporal y devuelve `{ stopped }`; `dsh_web_status` informa sin cambiar nada — `running`, y si hay instancia también `url`, `jobId`, `startedAt`, `home`, `port`, `sharedKey`, `install` y `exposed`, junto con `runningCount` y `maxInstances`. Parar desde la lista de tareas, con `job_kill` o con `dsh_web_stop` acaba en el mismo estado.
 
 En una sesión vacía (aún sin mensajes) no se puede ejecutar `/dsh-web`: DSH filtra esas sesiones de la lista, así que al cambiar desaparecería y la instancia perdería su botón de parada. El comando devuelve un aviso pidiendo enviar un mensaje antes o usar una sesión existente; ese aviso aparece sobre el cuadro de entrada, porque una sesión vacía no dibuja la transcripción donde normalmente se muestran los resultados.
 
@@ -84,6 +116,10 @@ Además, al escribir `/dsh-web` completo, el menú `/` puede dejar el resaltado 
 - Una llamada correcta guarda el token en la transcripción de la sesión y en las peticiones posteriores al modelo. 临No lo escribas en logs» no impide que el host lo almacene.
 - El plugin no lee `.credentials.yaml` ni genera cookies.
 - Las URL que no son de bucle local (`--public-url`, una IP de LAN o `0.0.0.0`) se rechazan salvo que la config sea exactamente `allowPublic: true`.
+- Una instancia aislada es un proceso hijo `dsh web` real. Con `shareApiKey: true` (por defecto) recibe la `DEEPSEEK_API_KEY` de este proceso por su entorno: no se escribe en el directorio temporal ni se imprime, pero cualquier proceso del mismo usuario puede leerla, y cada turno dentro de ella consume la misma cuenta. `shareApiKey: false` lo desactiva.
+- `install` ejecuta los scripts de ciclo de vida de pnpm de los paquetes indicados con tu usuario. Los specs se validan por juego de caracteres (sin espacios, comillas ni `&|<>^`), lo que bloquea la inyección de metacaracteres de shell, pero no dice nada de un paquete malicioso bien formado. `allowInstall: false` rechaza las instalaciones.
+- Los argumentos de exposición (`host`, `public_url`, `tls_cert`/`tls_key`, `trusted_host`) solo se aceptan con `allowPublic: true`, y `host` rechaza comodines incluso entonces. Al activarlo, la red alcanzable es el público del token; TLS no reduce ese público.
+- Al detener se termina el árbol de procesos (`taskkill /T` en Windows) y se borra el directorio temporal. El barrido de arranque solo mata un proceso residual cuando su puerto registrado sigue devolviendo la firma 401 de DSH, así que un PID reutilizado nunca se mata por error.
 - No tiene relación con [Discussion #8678](https://github.com/deepseek-ai/deepseek-harness/discussions/8678) (falsificación de cookies dentro de un sandbox): este plugin nunca toca ese secreto.
 
 ## Compatibility
@@ -113,6 +149,16 @@ dsh plugin --profile <profile> revoke-version dsh-gui-auth-url@0.2.1
 
 **"This profile serves no Web GUI".** El perfil necesita `webApp` o `webServer` y `connection`; los perfiles headless no tienen GUI que abrir.
 
+**`dsh_web_start` rechaza `install`.** O el perfil tiene `allowInstall: false`, o un spec contiene un carácter fuera de `[A-Za-z0-9@._~:/\\+=%-]` (espacio, comilla, `&|<>^`). Corrige el spec o vuelve a habilitar las instalaciones en el parche del perfil.
+
+**La instalación falla y no aparece ninguna instancia.** Es lo esperado: se borra el directorio temporal y el error lleva la cola de la salida de instalación. Lee esa cola: casi siempre es un desajuste de versión (`engines.dsh`, ver la exención de arriba) o un fallo de registry/red.
+
+**`dsh_web_start` rechaza `host`, `public_url`, `tls_cert`, `tls_key` o `trusted_host`.** Los argumentos de exposición exigen `allowPublic: true` exacto; y un comodín (`0.0.0.0`, `::`, `*`) se rechaza incluso así: pasa una dirección concreta y deja el proxy inverso o el túnel fuera del plugin.
+
+**Un reinicio invalidó la URL.** Solo se reutiliza el puerto, y solo si está libre; el token cambia en cada arranque y reinicio, así que los enlaces viejos dan 401. `dsh_web_status` da la `url` actual.
+
+**`dsh_web_stop` dice que no detuvo nada.** Esta sesión ya no tenía instancia: se detuvo antes, se canceló desde la lista de tareas o la cerró `job_kill`. Confírmalo con `dsh_web_status` antes de asumir un fallo.
+
 ## Development
 
 ```bash
@@ -126,7 +172,7 @@ src/auth-url.js      resolución de URL base y llamada al Host (funciones puras)
 src/api-key.js       resolución de la DEEPSEEK_API_KEY para el Host aislado
 src/command.js       comando /dsh-web: arranque/reinicio automático y apertura del navegador
 src/isolated-web.js  gestor de instancias por sesión (spawn, restart, stop, barrido)
-src/isolated-tool.js herramientas del agente dsh_web_start / dsh_web_restart
+src/isolated-tool.js herramientas del agente dsh_web_start / dsh_web_restart / dsh_web_stop / dsh_web_status
 src/index.js         entrada de Cordis: gui_auth_url + superficie de instancias
 client.js            mitad de navegador: etiqueta/icono del comando, alias oculto, aviso
 locale/              metadatos de presentación (en, zh, es, pt, hi)
@@ -134,7 +180,7 @@ test/                pruebas node:test, incluidas las invariantes de empaquetado
 scripts/             comprobación del tarball usada por prepublishOnly y CI
 ```
 
-El plugin registra una herramienta de solo lectura, dos herramientas de instancia y un comando humano; los disposers que devuelve `ctx.tools.register` los posee Cordis, así que al descargar o recargar el plugin se eliminan limpiamente.
+El plugin registra una herramienta de solo lectura, cuatro herramientas de instancia y un comando humano; los disposers que devuelve `ctx.tools.register` los posee Cordis, así que al descargar o recargar el plugin se eliminan limpiamente.
 
 Empujar una etiqueta `v*` dispara `.github/workflows/publish.yml`; si el secreto del repositorio `NPM_TOKEN` no está configurado, el flujo se salta la publicación e informa en el log. La publicación manual (arriba) sigue siendo válida.
 

@@ -27,6 +27,7 @@ const REQUIRED = [
 	'src/auth-url.js',
 	'src/api-key.js',
 	'src/command.js',
+	'src/launch-options.js',
 	'src/isolated-tool.js',
 	'src/isolated-web.js',
 	'icon.svg',

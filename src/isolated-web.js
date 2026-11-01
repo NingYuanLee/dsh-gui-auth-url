@@ -28,21 +28,116 @@
  * Node (`ELECTRON_RUN_AS_NODE=1`) over the desktop-host CLI, falling back to
  * `dsh` on PATH for a plain Node installation.
  */
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { API_KEY_REF } from './api-key.js';
+import { createInstanceHome, createInstanceRoot, INSTANCE_PREFIX, openExistingInstanceRoot, readInstanceMarker, reinstateInstanceRecord, removeInstanceHome, removeStaleInstanceHome, resolveDshHome } from './instance-home.js';
+
+const execFileAsync = promisify(execFile);
+
+/** The address the launcher binds and the sweep probes: one value, used by both. */
+const PROBE_HOST = '127.0.0.1';
+
+/**
+ * Wait until a pid is gone, or the budget expires.
+ * @param {number} pid - process id to watch.
+ * @param {number} timeoutMs - budget in milliseconds.
+ * @returns {Promise<boolean>} whether the process is gone.
+ */
+async function waitForProcessExit(pid, timeoutMs) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (!isProcessAlive(pid)) return true;
+		await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+	}
+	return !isProcessAlive(pid);
+}
+
+/**
+ * Parse the LISTENING rows of a Windows `netstat -ano` listing.
+ *
+ * Each row is reduced to the local endpoint and the owning pid. Keeping this a
+ * pure function lets the tests pin the real parsing rules with raw text instead
+ * of replacing the whole resolver.
+ * @param {string} text - netstat output.
+ * @returns {{address: string, port: number, pid: number}[]} listening endpoints.
+ */
+export function parseNetstatListeners(text) {
+	const listeners = [];
+	for (const line of String(text).split(/\r?\n/u)) {
+		if (!/LISTENING/iu.test(line)) continue;
+		const columns = line.trim().split(/\s+/u);
+		if (columns.length < 5 || columns[0].toUpperCase() !== 'TCP') continue;
+		const local = columns[1] ?? '';
+		const at = local.lastIndexOf(':');
+		if (at <= 0) continue;
+		const address = local.slice(0, at).replace(/^\[|\]$/gu, '').toLowerCase();
+		const port = Number(local.slice(at + 1));
+		const pid = Number(columns[columns.length - 1]);
+		if (!Number.isSafeInteger(port) || port <= 0) continue;
+		if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+		listeners.push({ address, port, pid });
+	}
+	return listeners;
+}
+
+/**
+ * Pick the single process listening on one **address and port**.
+ *
+ * Matching the port alone is not enough: the HTTP probe talks to one specific
+ * endpoint, so a listener on `127.0.0.2:PORT` must never be mistaken for it.
+ * A wildcard bind counts as a candidate, and any disagreement between
+ * candidates yields `undefined` — ambiguity means "do not kill".
+ *
+ * @param {{address: string, port: number, pid: number}[]} listeners - parsed rows.
+ * @param {number} port - port to resolve.
+ * @param {string} [address] - probed address.
+ * @returns {number | undefined} the owning pid, or undefined when unknown/ambiguous.
+ */
+export function resolvePortOwnerFrom(listeners, port, address = PROBE_HOST) {
+	const wanted = String(address).toLowerCase();
+	const matching = listeners.filter((entry) => entry.port === port
+		&& (entry.address === wanted || entry.address === '0.0.0.0' || entry.address === '::'));
+	const owners = new Set(matching.map((entry) => entry.pid));
+	return owners.size === 1 ? [...owners][0] : undefined;
+}
+
+/**
+ * Which process is listening on the probed endpoint, when the platform can say.
+ *
+ * A marker records a pid and a port; neither proves the other. Before an
+ * automatic kill the sweep asks the operating system who owns that exact
+ * endpoint and requires the answer to equal the recorded pid. Platforms that
+ * cannot answer return `undefined`, and an unknown owner means no automatic
+ * kill.
+ * @param {number} port - recorded port.
+ * @param {string} [address] - probed address.
+ * @returns {Promise<number | undefined>} owning pid, or undefined when unknown.
+ */
+async function defaultResolvePortOwner(port, address = PROBE_HOST) {
+	if (process.platform !== 'win32' || !Number.isSafeInteger(port) || port <= 0) return undefined;
+	try {
+		const { stdout } = await execFileAsync('netstat', ['-ano', '-p', 'tcp'], {
+			windowsHide: true,
+			timeout: 3000,
+			maxBuffer: 16 * 1024 * 1024,
+		});
+		return resolvePortOwnerFrom(parseNetstatListeners(stdout), port, address);
+	} catch {
+		return undefined;
+	}
+}
+import { hasLaunchOptions, installArgs, isExposed, launchArgs, normalizeLaunchRequest } from './launch-options.js';
 
 /** Prefix of every disposable home this module creates. */
 export const HOME_PREFIX = 'dsh-web-gui-';
 
 /** Marker written into each temporary home: which host process owns it and which Desktop process started it. */
 export const MARKER_FILENAME = 'instance.json';
-
-/** A marker-less home (written by an older plugin) is only removed once it is this old. */
-const LEGACY_HOME_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Background-job kind shown as the row badge in the task roster. */
 export const JOB_KIND = 'web-gui';
@@ -53,8 +148,27 @@ export const JOB_LABEL = '临时鉴权 DSH Web（dsh web）';
 /** The sole line `dsh web` prints for a human: `dsh web: <url>`. */
 const LAUNCH_PREFIX = 'dsh web:';
 
+/**
+ * Remove one home through the guarded deleter.
+ * @param {{root: string, realRoot: string}} instanceRoot - pinned instances root.
+ * @param {string} home - candidate directory.
+ * @returns {Promise<void>} resolves once the home is gone or was never there.
+ */
+async function removeGuarded(instanceRoot, home) {
+	// The normal lifecycle only ever deletes a home this process created, so the
+	// creation record and its token are mandatory here. Cross-process leftovers go
+	// through sweepStaleHomes' separate, narrower stale path.
+	await removeInstanceHome(instanceRoot, home, { requireRecord: true });
+}
+
 /** How long one isolated host may take to print its URL (first start may install). */
 const START_TIMEOUT_MS = 120000;
+
+/** How long installing package specs into a temporary profile may take. */
+const INSTALL_TIMEOUT_MS = 180000;
+
+/** Tail of the installer output kept for the failure message (never the whole log). */
+const INSTALL_OUTPUT_CAP = 4000;
 
 /** How long a killed instance may take to settle before its home is removed anyway. */
 const STOP_TIMEOUT_MS = 5000;
@@ -165,63 +279,114 @@ async function probeDshWeb(port) {
  * @param {(pid: number) => boolean} [options.isAlive] - process probe override.
  * @param {(pid: number) => void} [options.kill] - process-tree killer override.
  * @param {(marker: object) => Promise<boolean>} [options.verifyHost] - "is this recorded host still the DSH host?" probe.
- * @param {(home: string) => Promise<void>} [options.removeHome] - removal override.
- * @param {() => number} [options.now] - clock override.
- * @param {number} [options.legacyMaxAgeMs] - age after which a marker-less home is removed.
+ * @param {(home: string) => Promise<void>} [options.removeHome] - legacy removal override.
+ * @param {{root: string, realRoot: string}} [options.instanceRoot] - pinned instances root.
+ * @param {string} [options.instancesDir] - explicit instances root path instead of the pinned one.
  * @returns {Promise<string[]>} the homes that were removed.
  */
 export async function sweepStaleHomes(options = {}) {
-	const root = options.tmpdir ?? tmpdir();
 	const isAlive = options.isAlive ?? isProcessAlive;
 	const kill = options.kill ?? ((pid) => terminateTree({ pid }));
 	const verifyHost = options.verifyHost ?? ((marker) => probeDshWeb(marker?.port));
-	const removeHome = options.removeHome ?? ((home) => rm(home, { recursive: true, force: true, maxRetries: 3 }));
-	const now = options.now ?? (() => Date.now());
-	const legacyMaxAgeMs = options.legacyMaxAgeMs ?? LEGACY_HOME_MAX_AGE_MS;
+	const resolvePortOwner = options.resolvePortOwner ?? defaultResolvePortOwner;
+	const killWaitMs = options.killWaitMs ?? 2000;
+	const waitGone = options.waitGone ?? (async (pid, timeoutMs) => {
+		const deadline = Date.now() + timeoutMs;
+		while (Date.now() < deadline) {
+			if (!isAlive(pid)) return true;
+			await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+		}
+		return !isAlive(pid);
+	});
 	const removed = [];
 
-	let entries;
-	try {
-		entries = await readdir(root, { withFileTypes: true });
-	} catch {
-		return removed;
-	}
+	// The instances root is pinned once per sweep and is only ever opened, never
+	// created: a maintenance pass must not write into the user's home.
+	const instanceRoot = options.instanceRoot
+		?? await openExistingInstanceRoot(options.instancesDir === undefined ? {} : { root: options.instancesDir }).catch(() => undefined);
 
-	for (const entry of entries) {
-		if (!entry.isDirectory() || !entry.name.startsWith(HOME_PREFIX)) continue;
-		const home = join(root, entry.name);
+	if (instanceRoot !== undefined) {
+		const entries = await readdir(instanceRoot.root, { withFileTypes: true }).catch(() => []);
+		for (const entry of entries) {
+			if (!entry.isDirectory() || !entry.name.startsWith(INSTANCE_PREFIX)) continue;
+			const home = join(instanceRoot.root, entry.name);
 
-		let marker;
-		try {
-			marker = JSON.parse(await readFile(join(home, MARKER_FILENAME), 'utf8'));
-		} catch {
-			marker = undefined;
-		}
+			// The host marker is written by the launcher once a host exists. A home
+			// without one proves nothing about liveness, so it is left alone.
+			let hostMarker;
+			try {
+				hostMarker = JSON.parse(await readFile(join(home, MARKER_FILENAME), 'utf8'));
+			} catch {
+				continue;
+			}
+			const pid = Number(hostMarker?.pid);
+			const parentPid = Number(hostMarker?.parentPid);
+			if (!(Number.isSafeInteger(pid) && pid > 0)) continue;
 
-		const pid = Number(marker?.pid);
-		const parentPid = Number(marker?.parentPid);
-		if (Number.isSafeInteger(pid) && pid > 0) {
+			// Ownership first. No process is signalled and nothing is deleted until
+			// the directory itself is proven to be this plugin's: a marker that fails
+			// validation leaves both the process and the directory exactly as they are.
+			try {
+				await readInstanceMarker(instanceRoot, home);
+			} catch {
+				continue;
+			}
+
 			const hostAlive = isAlive(pid);
 			const parentGone = !(Number.isSafeInteger(parentPid) && parentPid > 0 && isAlive(parentPid));
 			const previousLifecycle = parentPid === process.pid;
-			if (parentGone || previousLifecycle || !hostAlive) {
-				if (hostAlive && await verifyHost(marker).catch(() => false)) kill(pid);
-				await removeHome(home).catch(() => {});
-				removed.push(home);
+			if (!(parentGone || previousLifecycle || !hostAlive)) continue;
+
+			if (hostAlive) {
+				// The recorded pid must be the process actually listening on the
+				// recorded port before anything is signalled: a recycled pid would
+				// otherwise cost an unrelated process its life.
+				const ownerPid = await resolvePortOwner(Number(hostMarker?.port), PROBE_HOST).catch(() => undefined);
+				if (ownerPid !== pid) continue;
+				if (!(await verifyHost(hostMarker).catch(() => false))) continue;
+				kill(pid);
+				if (!(await waitGone(pid, killWaitMs))) continue;
 			}
+
+			const outcome = await removeStaleInstanceHome(instanceRoot, home).catch(() => undefined);
+			if (outcome?.removed === true) removed.push(home);
+		}
+	}
+
+	// Legacy homes written by plugin versions before 0.7.3 live under %TEMP% and
+	// carry no owner token. They are removed only when their host marker exists
+	// and that host is provably gone: prefix or age alone deletes nothing.
+	const legacyRoot = resolve(options.tmpdir ?? tmpdir());
+	const legacyEntries = await readdir(legacyRoot, { withFileTypes: true }).catch(() => []);
+	for (const entry of legacyEntries) {
+		if (!entry.isDirectory() || !entry.name.startsWith(HOME_PREFIX)) continue;
+		const home = join(legacyRoot, entry.name);
+		let hostMarker;
+		try {
+			hostMarker = JSON.parse(await readFile(join(home, MARKER_FILENAME), 'utf8'));
+		} catch {
 			continue;
 		}
-
-		// Marker-less home from an older plugin version: only remove what is safely old.
-		let age = 0;
-		try {
-			age = now() - (await stat(home)).mtimeMs;
-		} catch {
-			age = 0;
+		const pid = Number(hostMarker?.pid);
+		const parentPid = Number(hostMarker?.parentPid);
+		if (!(Number.isSafeInteger(pid) && pid > 0)) continue;
+		const hostAlive = isAlive(pid);
+		const parentGone = !(Number.isSafeInteger(parentPid) && parentPid > 0 && isAlive(parentPid));
+		const previousLifecycle = parentPid === process.pid;
+		if (!(parentGone || previousLifecycle || !hostAlive)) continue;
+		if (hostAlive) {
+			const ownerPid = await resolvePortOwner(Number(hostMarker?.port)).catch(() => undefined);
+			if (ownerPid !== pid) continue;
+			if (!(await verifyHost(hostMarker).catch(() => false))) continue;
+			kill(pid);
+			if (!(await waitGone(pid, killWaitMs))) continue;
 		}
-		if (age > legacyMaxAgeMs) {
-			await removeHome(home).catch(() => {});
+		try {
+			if (options.removeHome === undefined) await rm(home, { recursive: true, force: true, maxRetries: 3 });
+			else await options.removeHome(home);
 			removed.push(home);
+		} catch {
+			// A cleanup that failed is not a cleanup that happened: report nothing.
 		}
 	}
 
@@ -338,18 +503,48 @@ export function createIsolatedWebGui(options = {}) {
 		throw new Error('isolated Web GUI requires the session job registry (ctx.jobs)');
 	}
 	const spawnProcess = options.spawn ?? spawn;
-	const makeHome = options.makeHome ?? (() => mkdtemp(join(tmpdir(), HOME_PREFIX)));
-	const removeHome = options.removeHome ?? ((home) => rm(home, { recursive: true, force: true, maxRetries: 3 }));
+	// The instances root is resolved once and reused for every create and delete
+	// this manager performs. Re-resolving per call would let a changed $DSH_HOME
+	// point creation and deletion at different trees. It is also created lazily:
+	// a caller that injects both makeHome and removeHome (every test does) must
+	// not cause a real directory to appear in the user's home.
+	// The path configuration is captured here, at construction, so a later
+	// environment change cannot move the root between two calls. Only the
+	// filesystem work is deferred (that is what keeps injected test doubles from
+	// touching the real home).
+	const capturedHome = options.instanceRoot === undefined ? resolveDshHome() : undefined;
+	let instanceRootPromise;
+	const instanceRoot = () => {
+		instanceRootPromise ??= options.instanceRoot !== undefined
+			? Promise.resolve(options.instanceRoot)
+			: createInstanceRoot({ dshHome: capturedHome });
+		instanceRootPromise.catch(() => {});
+		return instanceRootPromise;
+	};
+	const makeHome = options.makeHome ?? (async () => (await createInstanceHome(await instanceRoot())).home);
+	const removeHome = options.removeHome ?? (async (home) => {
+		await removeGuarded(await instanceRoot(), home);
+	});
 	const launcher = options.launcher ?? resolveLauncher();
 	const startTimeoutMs = options.startTimeoutMs ?? START_TIMEOUT_MS;
 	const stopTimeoutMs = options.stopTimeoutMs ?? STOP_TIMEOUT_MS;
 	const pollMs = options.pollMs ?? POLL_MS;
+	const waitExit = options.waitGone ?? waitForProcessExit;
 	const maxInstances = options.maxInstances ?? DEFAULT_MAX_INSTANCES;
 	const resolveApiKey = options.resolveApiKey;
+	const allowPublic = options.allowPublic === true;
+	const allowInstall = options.allowInstall !== false;
+	const installTimeoutMs = options.installTimeoutMs ?? INSTALL_TIMEOUT_MS;
 	const kind = options.kind ?? JOB_KIND;
 	const label = options.label ?? JOB_LABEL;
 	/** One instance per owner (session id), so concurrent sessions never preempt each other. */
 	const instances = new Map();
+	/**
+	 * Homes an in-place restart wants to keep while the old child exits. Keyed by
+	 * the resolved path; the spawn layer asks this set at exit time, so the
+	 * decision cannot be lost to closure timing.
+	 */
+	const retainedHomes = new Set();
 
 	/** Job status, or `gone` when the registry no longer knows it (or fences the caller out). */
 	function statusOf(id, caller) {
@@ -374,9 +569,13 @@ export function createIsolatedWebGui(options = {}) {
 	 * @param {string} home - this instance's temporary `DSH_HOME`.
 	 * @param {{value: boolean}} retain - flipped before an in-place restart so the exit handler leaves the home on disk.
 	 * @param {number} [port] - fixed listen port; `0`/absent lets the OS choose one.
+	 * @param {string[]} [extraArgs] - exposure flags (`--host`, `--public-url`, `--trusted-host`, TLS).
 	 */
-	function spawnInstance(env, captured, home, retain, port) {
-		const child = spawnProcess(launcher.command, [...launcher.args, 'web', '--no-open', '--port', String(port ?? 0)], {
+	function spawnInstance(env, captured, home, shouldRetain, port, extraArgs = []) {
+		const child = spawnProcess(
+			launcher.command,
+			[...launcher.args, 'web', '--no-open', '--port', String(port ?? 0), ...extraArgs],
+			{
 			env,
 			stdio: ['ignore', 'pipe', 'pipe'],
 			windowsHide: true,
@@ -385,12 +584,26 @@ export function createIsolatedWebGui(options = {}) {
 		child?.stdout?.on?.('data', (chunk) => {
 			captured.text += chunk.toString();
 		});
+		// stderr is not URL output, but it is where a busy-port conflict is
+		// reported; keep it for the retryability check only.
+		child?.stderr?.on?.('data', (chunk) => {
+			captured.stderr = (captured.stderr ?? '') + chunk.toString();
+		});
 		// A host this module ended on request settles as `killed`, not `failed`:
 		// the registry's roster labels that state "cancelled", while a taskkill
 		// exit code alone would read as a crash.
 		let cancelled = false;
+		// `done` is the job outcome and settles on exit *or* error; `exited` is
+		// evidence and settles only on the child's `exit` event. A spawn error says
+		// nothing about the process having gone away, so it must not satisfy the
+		// proof that the home is disposable.
+		let markExited;
+		const exited = new Promise((resolveExit) => {
+			markExited = resolveExit;
+		});
 		const done = new Promise((resolve) => {
 			child?.once?.('exit', (code) => {
+				markExited();
 				if (cancelled) {
 					resolve({ status: 'killed', detail: 'isolated Web GUI stopped' });
 					return;
@@ -405,8 +618,11 @@ export function createIsolatedWebGui(options = {}) {
 				detail: String(error?.message ?? error),
 			}));
 		});
-		void done.then(() => {
-			if (!retain.value) removeHome(home).catch(() => {});
+		// Retention is a manager-level decision, not a flag captured at spawn time:
+		// an in-place restart keeps the home for the *old* child while the new one
+		// still owns its own lifecycle.
+		void exited.then(() => {
+			if (!shouldRetain()) removeHome(home).catch(() => {});
 		});
 		return {
 			child,
@@ -414,11 +630,10 @@ export function createIsolatedWebGui(options = {}) {
 				cancelled = true;
 				terminateTree(child);
 			},
-			/** Keep the temporary home when this child exits (in-place restart). */
-			retainHome: () => {
-				retain.value = true;
-			},
+			/** Kept for callers that still ask; retention itself lives in the manager. */
+			retainHome: () => {},
 			done,
+			exited,
 			readOutput: () => {
 				const delta = captured.text.slice(captured.cursor);
 				captured.cursor = captured.text.length;
@@ -428,36 +643,167 @@ export function createIsolatedWebGui(options = {}) {
 	}
 
 	/**
+	 * Install package specs into one temporary profile before its host starts.
+	 *
+	 * `dsh plugin --profile web add` is the sanctioned way to put a plugin into a
+	 * profile; with `DSH_HOME` pointed at the disposable home it writes only there,
+	 * so a plugin can be exercised before it ever touches the real profile. The
+	 * command forwards to pnpm, so it runs third-party install scripts as this
+	 * user — that is why `launch-options.js` restricts the specs to a conservative
+	 * character set and the plugin config can refuse the option entirely.
+	 *
+	 * Failure is terminal for the start: a profile with half its packages
+	 * installed would produce a host whose behaviour nobody can attribute.
+	 *
+	 * @param {string} home - the instance's temporary `DSH_HOME`.
+	 * @param {string[]} specs - validated package specs.
+	 * @param {Record<string, string>} env - the child environment (carries `DSH_HOME`).
+	 * @returns {Promise<void>} resolves when the package manager exits 0.
+	 */
+	function installInto(home, specs, env) {
+		const argv = installArgs(launcher, specs);
+		return new Promise((resolve, reject) => {
+			let output = '';
+			let timedOut = false;
+			let settled = false;
+			let timer;
+			const settle = (error) => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				if (error === undefined) resolve();
+				else reject(error);
+			};
+			let child;
+			try {
+				child = spawnProcess(argv.command, argv.args, {
+					env,
+					stdio: ['ignore', 'pipe', 'pipe'],
+					windowsHide: true,
+				});
+			} catch (error) {
+				settle(new Error(`installing into the temporary profile could not start: ${String(error?.message ?? error)}`));
+				return;
+			}
+			const collect = (chunk) => {
+				output = (output + chunk.toString()).slice(-INSTALL_OUTPUT_CAP);
+			};
+			child?.stdout?.on?.('data', collect);
+			child?.stderr?.on?.('data', collect);
+			timer = setTimeout(() => {
+				timedOut = true;
+				try {
+					terminateTree(child);
+				} catch {
+					// A child that already exited needs no kill.
+				}
+			}, installTimeoutMs);
+			child?.once?.('exit', (code) => {
+				if (timedOut) {
+					settle(new Error(`installing into the temporary profile timed out after ${String(installTimeoutMs)} ms`));
+					return;
+				}
+				if (code === 0) {
+					settle();
+					return;
+				}
+				const detail = output.trim();
+				settle(new Error(`installing into the temporary profile failed (exit code ${String(code)})`
+					+ (detail === '' ? '' : `: ${detail}`)));
+			});
+			child?.once?.('error', (error) => settle(
+				new Error(`installing into the temporary profile failed: ${String(error?.message ?? error)}`),
+			));
+		});
+	}
+
+	/**
 	 * Spawn one host for one owner and wait for its announced URL.
 	 * @param {unknown} sessionId - the owning session id.
 	 * @param {string} [existingHome] - a preserved temporary home to recreate the host in (in-place restart).
 	 * @param {number} [port] - fixed listen port for an in-place restart; absent/0 lets the OS choose.
+	 * @param {object} [request] - validated launch request ({@link import('./launch-options.js').normalizeLaunchRequest}).
 	 */
-	async function start(sessionId, existingHome, port) {
+	async function start(sessionId, existingHome, port, request) {
 		const owner = normalizeOwner(sessionId);
 		if (owner === undefined) throw new Error('isolated Web GUI requires a session-bound owner (no session id)');
 		const freshHome = existingHome === undefined;
 		const home = existingHome ?? await makeHome();
-		// Only the child being replaced during a restart is told to keep its home;
-		// the replacement removes the home on its own normal stop.
-		const retain = { value: false };
+		// Retention is decided by the manager (see retainedHomes): an in-place
+		// restart marks this home as kept before killing the old child.
+		const homeKey = () => resolve(home).toLowerCase();
 		const apiKey = resolveApiKey === undefined ? undefined : await resolveApiKey().catch(() => undefined);
-		const env = { ...process.env, ...launcher.env, DSH_HOME: home };
+		// The child is its own Harness instance: it must not inherit the caller's
+		// DSH_* identity (profile dir, session id, web url, shell marker). Leaking
+		// DSH_PROFILE_DIR in particular makes the isolated host load the real
+		// desktop profile — and every plugin mounted there — inside the disposable
+		// home. Only DSH_HOME crosses the boundary, and it is set below.
+		const inherited = Object.fromEntries(
+			Object.entries(process.env).filter(([name]) => !name.startsWith('DSH_')),
+		);
+		const env = { ...inherited, ...launcher.env, DSH_HOME: home };
 		if (typeof apiKey === 'string' && apiKey !== '') env[API_KEY_REF] = apiKey;
 		const sharedKey = typeof apiKey === 'string' && apiKey !== '';
+		// Packages go in before the host starts, so the first announced URL already
+		// belongs to a profile that has them. A failure removes the fresh home: a
+		// half-installed profile would start a host nobody can attribute.
+		const specs = request?.install ?? [];
+		if (specs.length > 0) {
+			try {
+				await installInto(home, specs, env);
+			} catch (error) {
+				if (freshHome) await removeHome(home).catch(() => {});
+				throw error;
+			}
+		}
 		const captured = { text: '', cursor: 0 };
-		const spec = { kind, label, owner, run: () => (hooks = spawnInstance(env, captured, home, retain, port)) };
-
+		const outputTail = () => `${captured.text}\n${captured.stderr ?? ''}`.trim().slice(-1500);
+		const extraArgs = launchArgs(request);
+		// The record exists before the spawn so every failure path below can keep
+		// it when the child's exit cannot be proven.
+		const instance = {
+			id: undefined,
+			home,
+			url: undefined,
+			sharedKey,
+			owner,
+			hooks: undefined,
+			request: request ?? { install: [], trustedHost: [] },
+			startedAt: Date.now(),
+		};
 		let hooks;
+		const spec = {
+			kind,
+			label,
+			owner,
+			run: () => {
+				hooks = spawnInstance(env, captured, home, () => retainedHomes.has(homeKey()), port, extraArgs);
+				instance.hooks = hooks;
+				return hooks;
+			},
+		};
+
 		let id;
 		try {
 			id = jobs.start(spec);
+			instance.id = id;
 		} catch (error) {
+			// The registry may have spawned (and then refused) a child: a start
+			// failure is not proof that no process exists.
+			const failure = new Error(`${error?.message ?? String(error)}`);
+			failure.cause = error;
+			failure.exitConfirmed = hooks === undefined ? true : await confirmedExit(hooks);
+			failure.portRetryable = false;
+			failure.output = outputTail();
+			if (!failure.exitConfirmed) {
+				instances.set(owner, instance);
+				failure.message = `${failure.message}; the host exit could not be confirmed, keeping ${home}`;
+				throw failure;
+			}
 			if (freshHome) await removeHome(home).catch(() => {});
-			throw error;
+			throw failure;
 		}
 
-		const instance = { id, home, url: undefined, sharedKey, owner, hooks };
 		const deadline = Date.now() + startTimeoutMs;
 		while (Date.now() < deadline) {
 			const url = parseLaunchedUrl(captured.text);
@@ -470,12 +816,28 @@ export function createIsolatedWebGui(options = {}) {
 				} catch {
 					// Keep the spawn-time marker; the sweep then only clears this home.
 				}
+				// The host owns its home and may have cleared entries; re-assert the
+				// ownership record now that the host is up, so a later stop can still
+				// prove the directory is ours.
+				await reinstateInstanceRecord(await instanceRoot(), home, { pid: hooks?.child?.pid }).catch(() => {});
 				return instance;
 			}
 			const status = statusOf(id, owner);
 			if (status !== 'running' && status !== 'stopping') {
+				// A settled job is a job outcome, not an exit proof: the child may
+				// still be alive after an `error`.
+				const failure = new Error(`dsh web exited before announcing a URL (${status})`);
+				failure.exitConfirmed = await confirmedExit(hooks);
+				const logs = `${captured.text}\n${captured.stderr ?? ''}`;
+				failure.portRetryable = failure.exitConfirmed && /EADDRINUSE|address already in use/iu.test(logs);
+				failure.output = outputTail();
+				if (!failure.exitConfirmed) {
+					instances.set(owner, instance);
+					failure.message = `${failure.message} and its exit could not be confirmed; keeping ${home}`;
+					throw failure;
+				}
 				if (freshHome) await removeHome(home).catch(() => {});
-				throw new Error(`dsh web exited before announcing a URL (${status})`);
+				throw failure;
 			}
 			await new Promise((resolve) => setTimeout(resolve, pollMs));
 		}
@@ -485,8 +847,37 @@ export function createIsolatedWebGui(options = {}) {
 		} catch {
 			// A job that vanished on its own needs no kill.
 		}
+		const timeoutFailure = new Error(`dsh web did not announce a URL within ${String(startTimeoutMs)} ms`);
+		timeoutFailure.exitConfirmed = await confirmedExit(hooks);
+		timeoutFailure.portRetryable = false;
+		timeoutFailure.output = outputTail();
+		if (!timeoutFailure.exitConfirmed) {
+			instances.set(owner, instance);
+			timeoutFailure.message = `${timeoutFailure.message} and its exit could not be confirmed; keeping ${home}`;
+			throw timeoutFailure;
+		}
 		if (freshHome) await removeHome(home).catch(() => {});
-		throw new Error(`dsh web did not announce a URL within ${String(startTimeoutMs)} ms`);
+		throw timeoutFailure;
+	}
+
+	/**
+	 * Prove that a spawned host has actually exited.
+	 *
+	 * Only two things count: the child's `exit` event, or its pid disappearing
+	 * from the process table. A settled job, a spawn `error`, or a timeout says
+	 * nothing about whether the process is still alive.
+	 * @param {object} hooks - spawn hooks.
+	 * @returns {Promise<boolean>} whether exit is proven.
+	 */
+	async function confirmedExit(hooks) {
+		const timeoutFalse = new Promise((resolveWait) => setTimeout(() => resolveWait(false), stopTimeoutMs));
+		const settled = hooks?.exited === undefined
+			? false
+			: await Promise.race([hooks.exited.then(() => true, () => true), timeoutFalse]);
+		if (settled) return true;
+		const pid = Number(hooks?.child?.pid);
+		if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+		return await waitExit(pid, stopTimeoutMs);
 	}
 
 	/**
@@ -497,16 +888,29 @@ export function createIsolatedWebGui(options = {}) {
 	 */
 	async function stopInstance(instance, options = {}) {
 		const keepHome = options.keepHome === true;
-		if (keepHome) instance.hooks?.retainHome?.();
+		const homeKey = resolve(instance.home).toLowerCase();
+		// Registered before the kill: the child's exit handler reads this set, and
+		// it can run before this function resumes.
+		// A restart holds the home for its whole operation (the old child, the
+		// replacement, and any port-fallback retry); the caller releases it once a
+		// replacement is running. A normal stop releases it immediately.
+		if (keepHome) retainedHomes.add(homeKey);
+		else retainedHomes.delete(homeKey);
 		try {
 			jobs.kill(instance.id, instance.owner, keepHome ? 'restarted in place' : 'stopped by /dsh-web');
 		} catch {
-			// Already settled; removal below still applies.
+			// Already settled; the exit check below still decides.
 		}
 		try {
-			await jobs.wait(instance.id, stopTimeoutMs, instance.owner);
+			// Bounded even though the registry takes a timeout: a registry that
+			// never answers must not hang the stop forever.
+			await Promise.race([
+				jobs.wait(instance.id, stopTimeoutMs, instance.owner),
+				new Promise((resolveWait) => setTimeout(resolveWait, stopTimeoutMs)),
+			]);
 		} catch {
-			// A settlement we cannot observe is still a stopped process.
+			// Not being able to observe the settlement is not proof of exit; the
+			// direct evidence below decides.
 		}
 		// Backstop: a record the registry already dropped cannot cancel the producer,
 		// so settle the child directly instead of leaving an orphan and its home.
@@ -515,15 +919,38 @@ export function createIsolatedWebGui(options = {}) {
 		} catch {
 			// Killing an already-dead child changes nothing.
 		}
-		if (!keepHome) await removeHome(instance.home).catch(() => {});
+
+		// The home is only disposable once the process is provably gone.
+		const exited = await confirmedExit(instance.hooks);
+		if (!exited) {
+			// Keep the directory and the mapping untouched: deleting it now could
+			// race the still-running host, and a restart would make two processes
+			// share one home.
+			throw new Error(`the isolated host did not confirm exit; keeping ${instance.home} and refusing to continue`);
+		}
+		// The child has exited: a normal stop releases the home and disposes of it;
+		// a restart keeps the retention until its replacement is running.
+		if (!keepHome) {
+			retainedHomes.delete(homeKey);
+			try {
+				await removeHome(instance.home);
+			} catch (error) {
+				// The host is gone but the directory is not: reporting "stopped"
+				// while the home survives would hide a leaked temporary profile.
+				throw new Error(`the isolated host exited but its temporary home could not be removed: ${error?.message ?? String(error)}`);
+			}
+		}
 	}
 
 	/** Drop one owner's map entry and stop its instance. */
 	async function stopKey(key) {
 		const instance = instances.get(key);
 		if (instance === undefined) return false;
-		instances.delete(key);
+		// The record is dropped only once the stop is proven. A failed stop keeps
+		// the live instance addressable, so the caller can inspect and retry it
+		// instead of leaking an untracked host.
 		await stopInstance(instance);
+		instances.delete(key);
 		return true;
 	}
 
@@ -551,6 +978,10 @@ export function createIsolatedWebGui(options = {}) {
 			jobId: instance.id,
 			reused,
 			sharedKey: instance.sharedKey,
+			startedAt: instance.startedAt,
+			port: portOf(instance.url),
+			install: [...(instance.request?.install ?? [])],
+			exposed: isExposed(instance.request),
 		};
 	}
 
@@ -566,6 +997,11 @@ export function createIsolatedWebGui(options = {}) {
 	 * stop, and a registry refusal of the ownership binding is propagated the same
 	 * way — the failure is reported, never silently downgraded.
 	 *
+	 * A request that carries real launch options (an install list, a bind address,
+	 * TLS, an advertised root) is a request for a *differently configured* host, so
+	 * a running instance is restarted in place with them instead of being handed
+	 * back stale. A bare request keeps the cheap reuse path.
+	 *
 	 * Starting a host is expensive (a whole `dsh web` process and its
 	 * `DSH_HOME`), so a new one is refused once {@link maxInstances} hosts are
 	 * already running across all owners; reusing an owner's own live host is
@@ -576,19 +1012,28 @@ export function createIsolatedWebGui(options = {}) {
 	 * and become unstoppable once the person switches away.
 	 *
 	 * @param {unknown} sessionId - invoking session id; required.
-	 * @returns {Promise<{url: string, jobId: string, reused: boolean, sharedKey: boolean}>} the instance facts; `jobId` lets the caller stop it through the job registry.
+	 * @param {object} [launchRequest] - model-facing launch options (see `launch-options.js`).
+	 * @returns {Promise<object>} the instance facts; `jobId` lets the caller stop it through the job registry.
 	 */
-	async function ensure(sessionId) {
+	async function ensure(sessionId, launchRequest) {
 		const owner = normalizeOwner(sessionId);
 		if (owner === undefined) throw new Error('isolated Web GUI requires a session-bound owner (no session id)');
+		const request = normalizeLaunchRequest(launchRequest, { allowPublic, allowInstall });
 		const existing = instances.get(owner);
-		if (existing !== undefined && live(existing)) return facts(existing, true);
+		if (existing !== undefined && live(existing)) {
+			// A port-only request cannot be honoured by a running host, so it does not
+			// count as "reconfigure this instance"; everything else does.
+			if (hasLaunchOptions(request) && request.port === undefined) {
+				return { ...await restart(owner, request), reused: false };
+			}
+			return facts(existing, true);
+		}
 		// Settle this owner's stale instance (its job settled or vanished) before starting over.
 		if (existing !== undefined) await stopKey(owner);
 		if (instances.size >= maxInstances) {
 			throw new Error(`isolated Web GUI limit reached: ${String(instances.size)} of ${String(maxInstances)} hosts are already running; stop one before starting another`);
 		}
-		const instance = await start(owner);
+		const instance = await start(owner, undefined, request.port, request);
 		instances.set(owner, instance);
 		return facts(instance, false);
 	}
@@ -609,25 +1054,53 @@ export function createIsolatedWebGui(options = {}) {
 	 * @param {unknown} sessionId - invoking session id; required.
 	 * @returns {Promise<{url: string, jobId: string, reused: boolean, sharedKey: boolean, restarted: true}>} the new instance facts.
 	 */
-	async function restart(sessionId) {
+	async function restart(sessionId, launchRequest) {
 		const owner = normalizeOwner(sessionId);
 		if (owner === undefined) throw new Error('isolated Web GUI requires a session-bound owner (no session id)');
 		const existing = instances.get(owner);
 		if (existing === undefined) throw new Error('no isolated Web GUI is running for this session; start one before restarting');
-		instances.delete(owner);
+		const previous = existing.request ?? { install: [], trustedHost: [] };
+		const requested = normalizeLaunchRequest(launchRequest, { allowPublic, allowInstall });
+		// A restart keeps the configuration the preserved home was started with and
+		// replaces only the options this call names. Install specs are never re-run
+		// implicitly: they already landed in the home that survives the restart, so
+		// repeating the package-manager call would only add time.
+		const request = {
+			host: requested.host ?? previous.host,
+			publicUrl: requested.publicUrl ?? previous.publicUrl,
+			tlsCert: requested.tlsCert ?? previous.tlsCert,
+			tlsKey: requested.tlsKey ?? previous.tlsKey,
+			trustedHost: requested.trustedHost.length > 0 ? requested.trustedHost : [...(previous.trustedHost ?? [])],
+			install: requested.install,
+			port: requested.port,
+		};
+		// Stop first: a restart whose old host never confirmed exit must abort with
+		// the instance still tracked, not hand the same home to a second process.
+		// Hold the home from the first kill until a replacement is running: a
+		// replacement that exits during a port fallback must not delete the very
+		// home the retry is about to reuse. Released on success (the new host then
+		// owns its own cleanup) and deliberately kept on failure (so the home
+		// survives for a retry).
+		const keepKey = resolve(existing.home).toLowerCase();
+		retainedHomes.add(keepKey);
 		await stopInstance(existing, { keepHome: true });
+		instances.delete(owner);
 		// Keep the previous port when possible: the browser's auth cookie is bound
 		// to host:port and its signing secret lives in the kept `DSH_HOME`, so an
 		// already-open tab keeps working across the restart. A busy port falls back
 		// to an OS-assigned one, which is reported as a changed port.
-		const port = portOf(existing.url);
+		const port = requested.port ?? portOf(existing.url);
 		let instance;
 		try {
-			instance = await start(owner, existing.home, port);
+			instance = await start(owner, existing.home, port, request);
 		} catch (error) {
-			if (port === undefined) throw error;
-			instance = await start(owner, existing.home);
+			// Fall back to an OS-assigned port only when the failed attempt is
+			// provably gone and the failure was the old port being taken. Starting
+			// again on an unconfirmed exit would put two hosts on one home.
+			if (port === undefined || error?.exitConfirmed !== true || error?.portRetryable !== true) throw error;
+			instance = await start(owner, existing.home, undefined, request);
 		}
+		retainedHomes.delete(resolve(instance.home).toLowerCase());
 		instances.set(owner, instance);
 		return { ...facts(instance, false), restarted: true, portKept: port !== undefined && portOf(instance.url) === port };
 	}
@@ -659,5 +1132,42 @@ export function createIsolatedWebGui(options = {}) {
 		return { ...await ensure(owner), restarted: false };
 	}
 
-	return { ensure, ensureOrRestart, restart, stop, dispose: stop };
+	/**
+	 * Report what this owner's instance looks like right now.
+	 *
+	 * The command and the tools stop through the session's background-task roster,
+	 * so "is it still running, and where is it?" has to be answerable without
+	 * reading that roster: an agent that started a host to verify a plugin needs to
+	 * decide between reusing, restarting and stopping it.
+	 *
+	 * A record the registry no longer knows is not running, even if this manager
+	 * still holds it.
+	 *
+	 * @param {unknown} sessionId - invoking session id; required.
+	 * @returns {object} running flag, live counters, and the instance's own facts when one is recorded.
+	 */
+	function status(sessionId) {
+		const owner = normalizeOwner(sessionId);
+		if (owner === undefined) throw new Error('isolated Web GUI requires a session-bound owner (no session id)');
+		const records = [...instances.values()];
+		const runningCount = records.filter((record) => live(record)).length;
+		const summary = { running: false, runningCount, maxInstances };
+		const instance = instances.get(owner);
+		if (instance === undefined) return summary;
+		const running = live(instance);
+		return {
+			...summary,
+			running,
+			...(running ? { url: instance.url, jobId: instance.id } : {}),
+			startedAt: instance.startedAt,
+			home: instance.home,
+			port: portOf(instance.url),
+			sharedKey: instance.sharedKey,
+			install: [...(instance.request?.install ?? [])],
+			exposed: isExposed(instance.request),
+			jobStatus: statusOf(instance.id, owner),
+		};
+	}
+
+	return { ensure, ensureOrRestart, restart, stop, status, dispose: stop };
 }

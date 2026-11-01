@@ -21,7 +21,16 @@ import { defineTool } from '@deepseek-ai/dsh-tools';
 import { resolveGuiAuthUrl } from './auth-url.js';
 import { resolveDeepSeekApiKey } from './api-key.js';
 import { COMMAND_NAME, registerWebGuiCommand } from './command.js';
-import { RESTART_TOOL_NAME, TOOL_NAME as ISOLATED_TOOL_NAME, registerIsolatedRestartTool, registerIsolatedStartTool } from './isolated-tool.js';
+import {
+	RESTART_TOOL_NAME,
+	STOP_TOOL_NAME,
+	STATUS_TOOL_NAME,
+	TOOL_NAME as ISOLATED_TOOL_NAME,
+	registerIsolatedRestartTool,
+	registerIsolatedStartTool,
+	registerIsolatedStatusTool,
+	registerIsolatedStopTool,
+} from './isolated-tool.js';
 import { createIsolatedWebGui, sweepStaleHomes } from './isolated-web.js';
 
 export const name = 'gui-auth-url';
@@ -31,27 +40,39 @@ export const inject = ['connection', 'tools'];
 
 /**
  * Cordis config. `allowPublic: true` may attach the launch token to a
- * non-loopback advertised host; `openBrowser: false` makes the human command
- * report the URL without opening a browser; `shareApiKey: false` stops the
- * default behaviour of passing this process's DeepSeek API key to the isolated
- * Web GUI (on by default, so the isolated window can talk to the model without a
- * separate login); `maxInstances` caps how many isolated hosts may run at once
- * across sessions (default 4), because every host is a whole `dsh web` process.
- * Absent config stays closed, browser-opening, key-sharing, and capped at 4.
+ * non-loopback advertised host, and it is also the gate for the isolated
+ * instance's exposure options (`host`, `public_url`, `tls_*`, `trusted_host`);
+ * `openBrowser: false` makes the human command report the URL without opening a
+ * browser; `shareApiKey: false` stops the default behaviour of passing this
+ * process's DeepSeek API key to the isolated Web GUI (on by default, so the
+ * isolated window can talk to the model without a separate login); `maxInstances`
+ * caps how many isolated hosts may run at once across sessions (default 4),
+ * because every host is a whole `dsh web` process; `allowInstall: false` refuses
+ * the `install` option, so no request can make this profile run a package
+ * manager (installing a plugin runs its lifecycle scripts as this user).
+ * Absent config stays closed, browser-opening, key-sharing, install-allowing and
+ * capped at 4.
  */
 export const Config = {
 	'~standard': {
 		version: 1,
 		vendor: 'dsh-gui-auth-url',
 		validate(value) {
-			const defaults = { allowPublic: false, openBrowser: true, shareApiKey: true, maxInstances: 4 };
+			const defaults = {
+				allowPublic: false,
+				openBrowser: true,
+				shareApiKey: true,
+				maxInstances: 4,
+				allowInstall: true,
+			};
 			if (value === undefined || value === null) return { value: defaults };
 			if (typeof value !== 'object' || Array.isArray(value)) {
 				return { issues: [{ message: 'config must be an object' }] };
 			}
 			const keys = Object.keys(value);
 			for (const key of keys) {
-				if (key !== 'allowPublic' && key !== 'openBrowser' && key !== 'shareApiKey' && key !== 'maxInstances') {
+				if (key !== 'allowPublic' && key !== 'openBrowser' && key !== 'shareApiKey'
+					&& key !== 'maxInstances' && key !== 'allowInstall') {
 					return { issues: [{ message: `unknown config key ${key}`, path: [key] }] };
 				}
 			}
@@ -64,6 +85,9 @@ export const Config = {
 			if ('shareApiKey' in value && typeof value.shareApiKey !== 'boolean') {
 				return { issues: [{ message: 'shareApiKey must be a boolean', path: ['shareApiKey'] }] };
 			}
+			if ('allowInstall' in value && typeof value.allowInstall !== 'boolean') {
+				return { issues: [{ message: 'allowInstall must be a boolean', path: ['allowInstall'] }] };
+			}
 			if ('maxInstances' in value
 				&& (!Number.isSafeInteger(value.maxInstances) || value.maxInstances < 1 || value.maxInstances > 32)) {
 				return { issues: [{ message: 'maxInstances must be an integer between 1 and 32', path: ['maxInstances'] }] };
@@ -74,6 +98,7 @@ export const Config = {
 					openBrowser: value.openBrowser !== false,
 					shareApiKey: value.shareApiKey !== false,
 					maxInstances: value.maxInstances ?? 4,
+					allowInstall: value.allowInstall !== false,
 				},
 			};
 		},
@@ -95,23 +120,25 @@ const DESCRIPTION = '返回当前正在运行的 DeepSeek Harness Web GUI 的合
 	+ '注意：本工具返回的是当前进程这一份地址；`/' + COMMAND_NAME + '` 与 `' + ISOLATED_TOOL_NAME
 	+ '` 返回的是另起的临时鉴权 DSH Web 地址，两者不同（需要在不影响当前会话的前提下验证新东西时用它们）。'
 	+ '注意：url 内含本进程的临时启动令牌，只在当前进程存活期间有效；不要写入日志或提交到仓库。'
-	+ '在临时实例里装了需要重启才生效的插件后，用 `/' + COMMAND_NAME + ' restart`（或 `' + RESTART_TOOL_NAME + '`）原地重启：临时 DSH_HOME 保留，插件与配置不会丢。'
+	+ '在临时实例里装了需要重启才生效的插件后，用 `/' + COMMAND_NAME + ' restart`（或 `' + RESTART_TOOL_NAME + '`）原地重启：临时 DSH_HOME 保留，插件与配置不会丢；要「装包 + 重启」一步到位，用 `' + ISOLATED_TOOL_NAME + '` 的 install 参数。'
+	+ '临时实例另有 `' + STOP_TOOL_NAME + '`（停止并删除临时 DSH_HOME）与 `' + STATUS_TOOL_NAME + '`（只读查看是否在运行）两个工具。'
 	+ '成功调用仍会把该令牌写入会话，并随后续模型请求送出。'
 	+ '非回环地址默认拒绝；只有本插件 Cordis 配置显式 allowPublic 为 true 时才返回。';
 
 /**
  * Mount the read-only agent tool, and — when the composition has a job registry
  * — the temporary authenticated DSH Web: the human `/dsh-web` command plus the
- * agent's `dsh_web_start` / `dsh_web_restart` tools, which share one instance
- * manager.
+ * agent's `dsh_web_start` / `dsh_web_restart` / `dsh_web_stop` /
+ * `dsh_web_status` tools, which share one instance manager.
  * @param {object} ctx - Host plugin context.
- * @param {{allowPublic?: boolean, openBrowser?: boolean, shareApiKey?: boolean, maxInstances?: number}} [config] - validated plugin config.
+ * @param {{allowPublic?: boolean, openBrowser?: boolean, shareApiKey?: boolean, maxInstances?: number, allowInstall?: boolean}} [config] - validated plugin config.
  */
 export function apply(ctx, config = {}) {
 	const allowPublic = config?.allowPublic === true;
 	const openBrowser = config?.openBrowser !== false;
 	const shareApiKey = config?.shareApiKey !== false;
 	const maxInstances = config?.maxInstances;
+	const allowInstall = config?.allowInstall !== false;
 	ctx.tools.register(defineTool({
 		name: 'gui_auth_url',
 		description: DESCRIPTION,
@@ -130,12 +157,16 @@ export function apply(ctx, config = {}) {
 	}
 	const gui = createIsolatedWebGui({
 		jobs,
+		allowPublic,
+		allowInstall,
 		...(shareApiKey ? { resolveApiKey: () => resolveDeepSeekApiKey(ctx) } : {}),
 		...(maxInstances === undefined ? {} : { maxInstances }),
 	});
 	registerWebGuiCommand(ctx, { openBrowser, shareApiKey, gui });
 	registerIsolatedStartTool(ctx, { gui });
 	registerIsolatedRestartTool(ctx, { gui });
+	registerIsolatedStopTool(ctx, { gui });
+	registerIsolatedStatusTool(ctx, { gui });
 	if (typeof ctx.effect === 'function') {
 		ctx.effect(() => () => {
 			void gui.dispose();

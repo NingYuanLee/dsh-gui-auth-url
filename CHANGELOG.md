@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0
+
+- **一次性实例目录搬进 Harness home，并且只删自己建的那个目录**：临时 `DSH_HOME` 不再落在 `%TEMP%\dsh-web-gui-*`，改为 `<DSH_HOME>/dsh-gui-auth-url/instances/run-*`——位置在运行时按每台机器自己的 `$DSH_HOME`（缺省 `~/.dsh`）解析，插件里没有任何写死路径。目录用**非递归 `mkdir`** 独占创建（重名即换名，绝不认领已有目录）；所有权记录写在实例根的 `.owner-records/<实例>.json`，不放在宿主自己的 home 里——实测真实宿主第二次启动会清掉 home 根下的未知文件，标记放在 home 里会被一起清掉。记录以 `wx` 独占写入并带随机实例令牌，宿主每次输出 URL 后再幂等重建一次；原地重启从第一次 kill 到替换实例跑起来之间全程持有该实例，失败重试期间也不会被子进程退出误删。正常停机删除前必须匹配**本进程的创建记录与令牌**；跨进程遗留走单独的 `removeStaleInstanceHome`，只按标记与真实路径校验。根路径逐级创建并校验：`dsh-gui-auth-url`、`instances` 任一级已是 junction/符号链接就拒绝，`realpath` 脱离父级也拒绝。调用方即使把路径算错（空变量、误用只读的 `$home`、符号链接绕路），最坏结果是报错，而不是删掉用户目录。启动清扫同时覆盖新根与旧的 `%TEMP%\dsh-web-gui-*`，历史残留仍在首次启动时回收；旧目录没有实例令牌，只按宿主标记判定，且**仅在记录到的 pid 仍存活时**才校验端口归属（pid 已死时没有可归属的活进程，直接进入清理）。宿主存活时必须先证明「记录 pid 确实是监听所探测端点（`127.0.0.1:port`，地址与端口精确匹配）的进程」，解析有歧义或平台不支持就一律不终止；验证通过后还要等待其真正退出，退出未确认则目录与进程都保留。
+- **正常停机也确认退出**：`jobs.wait` 超时或注册表拒绝不再被当作"已停止"。退出证明单独维护——只有子进程的 `exit` 事件、或 pid 从进程表消失才算数；job 以 `error` 结算（进程可能还活着）**不**算退出证明。确认不了就保留目录并报错，原地重启也会因此中止，避免两个进程共用一个 home。停止失败时实例仍留在 manager 的映射里，可查询、可重试停止，也不会被当作不存在而启动替代实例。**启动失败路径同样适用**：宿主在输出 URL 前失败、或启动超时后无法终止时，不再直接删目录，而是先确认 `exit`（或 pid 消失）；确认不了就保留目录、保留实例记录，交给后续 `dsh_web_stop` 重试。只有尚未 spawn 子进程的分支（安装失败、注册表在 spawn 前拒绝）才直接清理。原地重启的「换端口重试」也同步收紧：只有前一次尝试**已确认退出**、且失败原因明确是端口占用（`EADDRINUSE` / `address already in use`）时才换端口重试；退出未确认时直接上抛，不会用同一个 home 再起第二个进程。
+- **启动参数透传**：`dsh_web_start` 把 `host`、`public_url`、`tls_cert`/`tls_key`、`trusted_host`、`port` 透传给被拉起的 `dsh web`。`host` 只接受具体的 IPv4/IPv6 字面量，`0.0.0.0`、`::`、`*` 一律拒绝——通配会把实例发布到所有网卡；这些暴露类参数统一要求 `allowPublic: true` 才放行。`port` 取 0–65535，`0` 交给系统分配；`dsh_web_restart` 故意不收 `port`，重启沿用原端口，已打开的页面才能继续用。
+- **装插件闭环**：新增 `install` 参数（`string[]`），在宿主启动前用 `dsh plugin --profile web add` 把包装进临时 `DSH_HOME`，于是「本地插件 → 装进一次性实例 → 重启生效 → 验证 → `dsh_web_stop` 清理」成了一个闭环，桌面 profile 全程不动。代价是 pnpm 会以当前用户身份执行这些包的 lifecycle 脚本；spec 做了字符白名单校验（拒绝空格、引号与 `&|<>^`），挡住的是安装命令注入，不是恶意包本身。安装失败会删掉临时目录，并把安装输出的尾部带回错误里，不留半成品实例。
+- **新增 `dsh_web_stop`**：无参数停止本会话的临时实例并删除临时 `DSH_HOME`，返回 `{ stopped }`。此前停止只能走「后台任务」列表或 `job_kill`，agent 自己没法在一个闭环里收尾。
+- **新增 `dsh_web_status`**：无参数、无副作用地汇报本会话实例状态（`running`、`url`、`jobId`、`startedAt`、`home`、`port`、`sharedKey`、`install`、`exposed`，以及全局的 `runningCount` 与 `maxInstances`）。此前只能靠上一次工具返回的记忆、或再启动一次来确认实例是否还活着。
+- **新增配置 `allowInstall`（默认 `true`）**：控制 `install` 参数是否被接受，设 `false` 时带 `install` 的请求直接报错。默认开启是因为「在一次性实例里试插件」本身就是这个功能的用途；不接受第三方安装需求的部署可以关掉。既有 4 个键（`allowPublic`、`openBrowser`、`shareApiKey`、`maxInstances`）不变。
+- **SECURITY.md 重写**：删掉「插件不监听端口、不 spawn 进程、不发外连」这类自 0.4.0 起就已失真的整段断言，改为按路径分述——取 URL 路径（不读 `.credentials.yaml`、不铸 Cookie、回环默认）、隔离实例路径（spawn 整个 `dsh web`、临时 `DSH_HOME`、子进程环境携带 `DEEPSEEK_API_KEY`、`taskkill /T` 结束进程树、home 清理与启动清扫）、install 路径（pnpm lifecycle 脚本＝以当前用户身份执行第三方代码）、暴露面（`allowPublic` 才放行非回环/TLS/`trusted_host`）、token 进会话记录。支持版本口径改为 `0.7.x`/`0.8.x`，不再写已停止支持的 `0.2.x`。
+
 ## 0.7.2
 
 - 发布流程自动化：新增 `npm run release -- <patch|minor|major>`（支持 `--dry-run` 预览）与 `preversion` 校验门禁（测试 + 语法 + 打包不通过就不改版本）；Publish 工作流在发布后轮询 registry 校验该版本存在并打印 `latest` dist-tag；五份 README 增加 Releasing 章节。仓库已配置 `NPM_TOKEN` Secret，打 tag 即可由 CI 自动发布。
