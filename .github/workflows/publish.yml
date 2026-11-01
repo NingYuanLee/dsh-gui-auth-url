@@ -42,11 +42,30 @@ jobs:
             exit 0
           fi
           version="$(node -p "require('./package.json').version")"
-          if npm view "dsh-gui-auth-url@$version" version >/dev/null 2>&1; then
-            echo "dsh-gui-auth-url@$version is already published; skipping"
+          # A previous run may have published (or staged) this version already; wait
+          # for registry visibility before attempting, so re-tagging does not race.
+          for attempt in $(seq 1 15); do
+            if [ "$(npm view "dsh-gui-auth-url@$version" version 2>/dev/null || true)" = "$version" ]; then
+              echo "dsh-gui-auth-url@$version is already published; skipping"
+              exit 0
+            fi
+            sleep 2
+          done
+          if npm publish --access public --tag latest; then
+            echo "published dsh-gui-auth-url@$version"
             exit 0
           fi
-          npm publish --access public --tag latest
+          # A concurrent or previously staged publish can still answer E409; treat it
+          # as done once the registry serves the version.
+          for attempt in $(seq 1 30); do
+            if [ "$(npm view "dsh-gui-auth-url@$version" version 2>/dev/null || true)" = "$version" ]; then
+              echo "publish reported an error, but $version is on the registry; treating as published"
+              exit 0
+            fi
+            sleep 4
+          done
+          echo "could not publish or verify dsh-gui-auth-url@$version"
+          exit 1
 
       - name: Verify the tagged version is on the registry
         env:
