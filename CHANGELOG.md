@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- 文档修正（无运行时变更）：五份 README 的 Development 段同步到当前模块清单与校验命令；es/pt/hi 补齐 `maxInstances` 与「已取消」语义、原地重启沿用原端口与 Cookie 说明、残留清扫、agent 三个入口、空白会话与菜单提示。新增 tag 触发的发布工作流（`.github/workflows/publish.yml`），CI 的语法检查改为 `npm run check`。
+
 ## 0.7.0
 
 - **重启沿用原端口**：原地重启不再每次换端口——新宿主尽量监听原端口，只有原端口被占用时才回退到系统分配。因为浏览器的登录 Cookie 绑定 `host:port`、签名密钥就在保留下来的临时 `DSH_HOME` 里，所以**已打开的旧页面刷新即可继续用**（实测：同目录同端口重启后，不带 token 访问仍能进 GUI）；旧链接里的 token 每次仍会变。结果里用 `portKept` 标明是否沿用，文案分别提示“刷新即可”与“需要换新链接”。
