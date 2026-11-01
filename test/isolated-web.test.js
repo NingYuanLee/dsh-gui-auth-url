@@ -138,7 +138,9 @@ test('resolveLauncher prefers the app executable with the desktop-host CLI', () 
 	});
 	assert.equal(launcher.command, 'C:\\Programs\\DeepSeek Harness\\DeepSeek Harness.exe');
 	assert.equal(launcher.env.ELECTRON_RUN_AS_NODE, '1');
-	assert.equal(launcher.args.at(-1), join('C:\\Programs\\DeepSeek Harness', 'resources', 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-desktop-host', 'lib', 'cli.js'));
+	// `dirname` treats backslashes as separators only on Windows, so assert the
+	// tail rather than a whole path built with the host platform's `join`.
+	assert.match(launcher.args.at(-1), /resources[\\/]app\.asar[\\/]dsh[\\/]node_modules[\\/]@deepseek-ai[\\/]dsh-desktop-host[\\/]lib[\\/]cli\.js$/u);
 });
 
 test('resolveLauncher falls back to dsh on PATH', () => {
