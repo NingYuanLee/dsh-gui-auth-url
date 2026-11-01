@@ -3,6 +3,10 @@ name: Publish
 # Publishing is manual by default (see README: Development). This workflow
 # publishes the tagged version when the repository secret NPM_TOKEN exists, and
 # skips cleanly when it does not — a missing secret must not fail a release tag.
+#
+# Configure the secret once under Settings -> Secrets and variables -> Actions
+# -> New repository secret, name NPM_TOKEN, value = an npm automation token with
+# publish rights for this package (npm -> Access Tokens -> Generate New Token).
 on:
   push:
     tags: ['v*']
@@ -22,6 +26,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Tag must match package.json
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           node -e "const p = require('./package.json'); const tag = process.env.GITHUB_REF_NAME ?? ''; if (!tag.startsWith('v') || tag.slice(1) !== p.version) { console.error('tag ' + tag + ' does not match package.json version ' + p.version); process.exit(1); }"
 
