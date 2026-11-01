@@ -140,19 +140,26 @@ Leave `allowPublic` unset on a Desktop loopback profile. The flag trusts whateve
 
 ```bash
 node --test test/*.test.js          # unit + manifest compliance tests
-node --check src/index.js && node --check src/auth-url.js
+node --check src/index.js && node --check src/auth-url.js && node --check src/api-key.js && node --check src/command.js && node --check src/isolated-tool.js && node --check src/isolated-web.js && node --check client.js
 npm run check:pack                  # verifies the published tarball contents
 ```
 
 ```text
-src/auth-url.js    pure helpers: base URL resolution + Host session call (unit-tested)
-src/index.js       Cordis plugin entry: registers the gui_auth_url tool
-locale/            display metadata (en, zh, es, pt, hi)
-test/              node:test suites, including packaging invariants
-scripts/           tarball check used by prepublishOnly and CI
+src/auth-url.js      pure helpers: base URL resolution + Host session call (unit-tested)
+src/api-key.js       DeepSeek API key resolution for the isolated host
+src/command.js       /dsh-web command: start/auto-restart and browser opening
+src/isolated-web.js  per-session instance manager (spawn, restart, stop, sweep)
+src/isolated-tool.js agent tools dsh_web_start / dsh_web_restart
+src/index.js         Cordis entry: gui_auth_url plus the instance surfaces
+client.js            browser half: command label/icon, hidden alias, blank-session notice
+locale/              display metadata (en, zh, es, pt, hi)
+test/                node:test suites, including packaging invariants
+scripts/             tarball check used by prepublishOnly and CI
 ```
 
-The plugin only registers a tool; `ctx.tools.register` returns the disposer that Cordis owns, so unloading or hot-reloading the plugin removes it cleanly.
+The plugin registers one read-only tool, two instance tools and one human command; `ctx.tools.register` disposers belong to Cordis, so unloading or hot-reloading the plugin removes them cleanly.
+
+Pushing a `v*` tag runs `.github/workflows/publish.yml`; when the repository secret `NPM_TOKEN` is not configured the workflow skips publishing and says so in the log. Manual publishing (above) stays valid.
 
 ## Related
 

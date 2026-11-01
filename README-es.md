@@ -65,11 +65,23 @@ El modelo ve el texto de `url`; el resto de campos queda para llamadas programá
 
 Configura `shareApiKey: true` para entregar la `DEEPSEEK_API_KEY` disponible (primero el entorno heredado, luego el almacén de credenciales) al Host aislado como variable de entorno, de modo que pueda hablar con el modelo sin volver a iniciar sesión; la clave nunca se escribe en el directorio temporal y cada turno consume la misma cuenta.
 
+Se ejecutan como máximo 4 instancias a la vez (ajustable con `maxInstances` en el parche del perfil, 1–32); al superar el límite, un arranque nuevo falla pidiendo detener una antes — cada instancia es un proceso `dsh web` completo, así que el tope evita acumulación. Una instancia detenida a propósito aparece como 临cancelada» en la lista de tareas, no como 临fallida».
+
+**Reinicio en el sitio**: con una instancia en marcha, `/dsh-web` la reinicia automáticamente (para forzarlo escribe `/dsh-web restart`, o el agente usa `dsh_web_restart`). El reinicio conserva el `DSH_HOME` temporal y **reutiliza el mismo puerto** cuando puede: el proceso y el token son nuevos, pero la cookie del navegador está ligada a `host:port` y su clave de firma vive en ese directorio temporal, así que la pestaña ya abierta sigue funcionando tras recargar; solo si el puerto está ocupado se recurre a uno aleatorio (el resultado lo indica). Los complementos instalados, la configuración y las sesiones internas se conservan; un stop normal borra todo el directorio temporal. Uso típico: instala un complemento en la instancia temporal, vuelve a ejecutar `/dsh-web` para que surta efecto y detenla al terminar: en el escritorio no queda nada instalado.
+
+Para evitar restos acumulados, cada home temporal registra `instance.json` (PID del host, PID del Desktop, puerto). Al arrancar, el plugin escanea `%TEMP%/dsh-web-gui-*`, borra los homes cuyo host o proceso Desktop ya no existe y solo termina un proceso residual cuando su puerto sigue devolviendo la firma 401 de DSH; los directorios antiguos sin marcador se limpian pasadas 24 horas. Al detener, en Windows se termina el árbol de procesos para no dejar hijos.
+
+Para el agente hay tres entradas, con papeles distintos: `gui_auth_url` devuelve la dirección del **proceso de escritorio actual** (la GUI que estás viendo; solo lectura, sin efectos); `dsh_web_start` arranca o reutiliza una **instancia temporal** y devuelve su `url` y `jobId` (sin abrir navegador); `dsh_web_restart` reinicia esa instancia en el sitio conservando el directorio temporal. Para detenerla usa la lista de tareas o `job_kill`; las tres comparten `shareApiKey`, propiedad y reglas de limpieza.
+
+En una sesión vacía (aún sin mensajes) no se puede ejecutar `/dsh-web`: DSH filtra esas sesiones de la lista, así que al cambiar desaparecería y la instancia perdería su botón de parada. El comando devuelve un aviso pidiendo enviar un mensaje antes o usar una sesión existente; ese aviso aparece sobre el cuadro de entrada, porque una sesión vacía no dibuja la transcripción donde normalmente se muestran los resultados.
+
+Además, al escribir `/dsh-web` completo, el menú `/` puede dejar el resaltado en la siguiente candidata y Enter elegiría esa fila en vez de ejecutar tu comando; selecciona con el ratón la fila 临临时鉴权 DSH Web».
+
 ## Security
 
 - La URL contiene el token de lanzamiento de este proceso: es una credencial equivalente a una sesión iniciada y solo funciona mientras el Host siga vivo.
 - No la escribas en logs, no la subas al repositorio y no la pegues en chats; vuelve a llamar a la herramienta para obtener una nueva.
-- Una llamada correcta guarda el token en la transcripción de la sesión y en las peticiones posteriores al modelo. «No lo escribas en logs» no impide que el host lo almacene.
+- Una llamada correcta guarda el token en la transcripción de la sesión y en las peticiones posteriores al modelo. 临No lo escribas en logs» no impide que el host lo almacene.
 - El plugin no lee `.credentials.yaml` ni genera cookies.
 - Las URL que no son de bucle local (`--public-url`, una IP de LAN o `0.0.0.0`) se rechazan salvo que la config sea exactamente `allowPublic: true`.
 - No tiene relación con [Discussion #8678](https://github.com/deepseek-ai/deepseek-harness/discussions/8678) (falsificación de cookies dentro de un sandbox): este plugin nunca toca ese secreto.
@@ -105,19 +117,26 @@ dsh plugin --profile <profile> revoke-version dsh-gui-auth-url@0.2.1
 
 ```bash
 node --test test/*.test.js
-node --check src/index.js && node --check src/auth-url.js
+node --check src/index.js && node --check src/auth-url.js && node --check src/api-key.js && node --check src/command.js && node --check src/isolated-tool.js && node --check src/isolated-web.js && node --check client.js
 npm run check:pack
 ```
 
 ```text
-src/auth-url.js    resolución de URL base y llamada al Host (funciones puras)
-src/index.js       entrada del plugin Cordis: registra gui_auth_url
-locale/            metadatos de presentación (en, zh, es, pt, hi)
-test/              pruebas node:test, incluidas las invariantes de empaquetado
-scripts/           comprobación del tarball usada por prepublishOnly y CI
+src/auth-url.js      resolución de URL base y llamada al Host (funciones puras)
+src/api-key.js       resolución de la DEEPSEEK_API_KEY para el Host aislado
+src/command.js       comando /dsh-web: arranque/reinicio automático y apertura del navegador
+src/isolated-web.js  gestor de instancias por sesión (spawn, restart, stop, barrido)
+src/isolated-tool.js herramientas del agente dsh_web_start / dsh_web_restart
+src/index.js         entrada de Cordis: gui_auth_url + superficie de instancias
+client.js            mitad de navegador: etiqueta/icono del comando, alias oculto, aviso
+locale/              metadatos de presentación (en, zh, es, pt, hi)
+test/                pruebas node:test, incluidas las invariantes de empaquetado
+scripts/             comprobación del tarball usada por prepublishOnly y CI
 ```
 
-El plugin solo registra una herramienta; el disposer que devuelve `ctx.tools.register` lo posee Cordis, así que al descargar o recargar el plugin se elimina limpiamente.
+El plugin registra una herramienta de solo lectura, dos herramientas de instancia y un comando humano; los disposers que devuelve `ctx.tools.register` los posee Cordis, así que al descargar o recargar el plugin se eliminan limpiamente.
+
+Empujar una etiqueta `v*` dispara `.github/workflows/publish.yml`; si el secreto del repositorio `NPM_TOKEN` no está configurado, el flujo se salta la publicación e informa en el log. La publicación manual (arriba) sigue siendo válida.
 
 ## Related
 

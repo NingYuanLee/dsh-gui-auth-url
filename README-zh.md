@@ -153,19 +153,26 @@ dsh plugin --profile <profile> revoke-version dsh-gui-auth-url@0.2.1
 
 ```bash
 node --test test/*.test.js          # 单元测试 + 清单合规测试
-node --check src/index.js && node --check src/auth-url.js
+node --check src/index.js && node --check src/auth-url.js && node --check src/api-key.js && node --check src/command.js && node --check src/isolated-tool.js && node --check src/isolated-web.js && node --check client.js
 npm run check:pack                  # 校验发布 tarball 内容
 ```
 
 ```text
-src/auth-url.js    纯函数：base URL 解析 + 调 Host 取会话（可单测）
-src/index.js       Cordis 插件入口：注册 gui_auth_url 工具
-locale/            展示元数据（en、zh、es、pt、hi）
-test/              node:test 用例，含打包不变量
-scripts/           prepublishOnly 与 CI 使用的 tarball 检查
+src/auth-url.js     纯函数：base URL 解析 + 调 Host 取会话（可单测）
+src/api-key.js      隔离实例的 DEEPSEEK_API_KEY 解析
+src/command.js      /dsh-web 命令：启动/自动重启与打开浏览器
+src/isolated-web.js 按会话的实例管理器（spawn、restart、stop、清扫）
+src/isolated-tool.js agent 工具 dsh_web_start / dsh_web_restart
+src/index.js        Cordis 入口：gui_auth_url 与实例相关表面
+client.js           浏览器端：命令标签/图标、隐藏旧别名、空白会话提示
+locale/             展示元数据（en、zh、es、pt、hi）
+test/               node:test 用例，含打包不变量
+scripts/            prepublishOnly 与 CI 使用的 tarball 检查
 ```
 
-插件只注册一个工具；`ctx.tools.register` 返回的 disposer 由 Cordis 持有，卸载或热重载时会干净移除。
+插件注册一个只读工具、两个实例工具和一条人类命令；`ctx.tools.register` 返回的 disposer 由 Cordis 持有，卸载或热重载时会干净移除。
+
+推送 `v*` 标签会触发 `.github/workflows/publish.yml`；仓库 Secret 未配置 `NPM_TOKEN` 时该工作流跳过发布并在日志里说明。手动发布（上面的流程）仍然有效。
 
 ## Related
 

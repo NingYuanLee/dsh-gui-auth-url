@@ -1,0 +1,44 @@
+name: Publish
+
+# Publishing is manual by default (see README: Development). This workflow
+# publishes the tagged version when the repository secret NPM_TOKEN exists, and
+# skips cleanly when it does not — a missing secret must not fail a release tag.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Tag must match package.json
+        run: |
+          node -e "const p = require('./package.json'); const tag = process.env.GITHUB_REF_NAME ?? ''; if (!tag.startsWith('v') || tag.slice(1) !== p.version) { console.error('tag ' + tag + ' does not match package.json version ' + p.version); process.exit(1); }"
+
+      - name: Install peer dependencies for the prepublish checks
+        run: npm install --no-save @deepseek-ai/dsh-tools@0.2.1-rc.2
+
+      - name: Publish unless the token is absent
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN is not configured; skipping npm publish"
+            exit 0
+          fi
+          version="$(node -p "require('./package.json').version")"
+          if npm view "dsh-gui-auth-url@$version" version >/dev/null 2>&1; then
+            echo "dsh-gui-auth-url@$version is already published; skipping"
+            exit 0
+          fi
+          npm publish --access public --tag latest
