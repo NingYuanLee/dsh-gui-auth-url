@@ -174,6 +174,10 @@ scripts/            prepublishOnly 与 CI 使用的 tarball 检查
 
 推送 `v*` 标签会触发 `.github/workflows/publish.yml`；仓库 Secret 未配置 `NPM_TOKEN` 时该工作流跳过发布并在日志里说明。手动发布（上面的流程）仍然有效。
 
+## Releasing
+
+发布用一条命令：`npm run release -- patch|minor|major`（加 `--dry-run` 只预览，不改任何东西）。它会先跑完整校验（测试 + 语法 + 打包），不通过就中止且不动文件；通过后改版本、提交、打 tag 并推送。tag 推送后由 `.github/workflows/publish.yml` 自动发布：仓库在 Settings → Secrets and variables → Actions 里配置了名为 `NPM_TOKEN` 的 npm 自动化令牌就发布，没配置就跳过并在日志里说明。
+
 ## Related
 
 - [Discussion #5932](https://github.com/deepseek-ai/deepseek-harness/discussions/5932) — 本机脚本访问 Web UI 被 401

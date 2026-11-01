@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2
+
+- 发布流程自动化：新增 `npm run release -- <patch|minor|major>`（支持 `--dry-run` 预览）与 `preversion` 校验门禁（测试 + 语法 + 打包不通过就不改版本）；Publish 工作流在发布后轮询 registry 校验该版本存在并打印 `latest` dist-tag；五份 README 增加 Releasing 章节。仓库已配置 `NPM_TOKEN` Secret，打 tag 即可由 CI 自动发布。
+
 ## 0.7.1
 
 - 文档修正（无运行时变更）：五份 README 的 Development 段同步到当前模块清单与校验命令；es/pt/hi 补齐 `maxInstances` 与「已取消」语义、原地重启沿用原端口与 Cookie 说明、残留清扫、agent 三个入口、空白会话与菜单提示。新增 tag 触发的发布工作流（`.github/workflows/publish.yml`），CI 的语法检查改为 `npm run check`。

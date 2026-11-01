@@ -138,6 +138,10 @@ El plugin registra una herramienta de solo lectura, dos herramientas de instanci
 
 Empujar una etiqueta `v*` dispara `.github/workflows/publish.yml`; si el secreto del repositorio `NPM_TOKEN` no está configurado, el flujo se salta la publicación e informa en el log. La publicación manual (arriba) sigue siendo válida.
 
+## Releasing
+
+Las publicaciones se hacen con un solo comando: `npm run release -- patch|minor|major` (añade `--dry-run` para solo previsualizar, sin cambiar nada). Primero ejecuta la validación completa (pruebas, sintaxis, empaquetado) y se detiene sin tocar nada si algo falla; después sube la versión, hace el commit, crea la etiqueta y empuja. La etiqueta dispara `.github/workflows/publish.yml`, que publica en npm cuando el secreto del repositorio `NPM_TOKEN` está configurado en Settings → Secrets and variables → Actions; si no, se salta la publicación y lo indica en el log.
+
 ## Related
 
 - [Discussion #5932](https://github.com/deepseek-ai/deepseek-harness/discussions/5932) — scripts locales que reciben 401 en la GUI web

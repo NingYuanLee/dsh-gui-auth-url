@@ -138,6 +138,10 @@ O plugin registra uma ferramenta somente leitura, duas ferramentas de instância
 
 Empurrar uma tag `v*` dispara `.github/workflows/publish.yml`; se o secret do repositório `NPM_TOKEN` não estiver configurado, o fluxo pula a publicação e registra isso no log. A publicação manual (acima) continua válida.
 
+## Releasing
+
+Lançar uma versão é um comando: `npm run release -- patch|minor|major` (adicione `--dry-run` para apenas pré-visualizar, sem alterar nada). Ele roda a validação completa (testes, sintaxe, empacotamento) primeiro e aborta sem tocar em nada se algo falhar; depois sobe a versão, faz o commit, cria a tag e envia. A tag dispara `.github/workflows/publish.yml`, que publica no npm quando o secret do repositório `NPM_TOKEN` está configurado em Settings → Secrets and variables → Actions; caso contrário, pula a publicação e registra isso no log.
+
 ## Related
 
 - [Discussion #5932](https://github.com/deepseek-ai/deepseek-harness/discussions/5932) — scripts locais recebendo 401 na GUI web

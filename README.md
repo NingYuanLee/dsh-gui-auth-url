@@ -161,6 +161,10 @@ The plugin registers one read-only tool, two instance tools and one human comman
 
 Pushing a `v*` tag runs `.github/workflows/publish.yml`; when the repository secret `NPM_TOKEN` is not configured the workflow skips publishing and says so in the log. Manual publishing (above) stays valid.
 
+## Releasing
+
+Releases take one command: `npm run release -- patch|minor|major` (add `--dry-run` to preview without changing anything). It runs the full validation chain (tests, syntax, pack) first and aborts untouched when a check fails; then it bumps the version, commits, tags and pushes. The tag triggers `.github/workflows/publish.yml`, which publishes to npm when the repository secret `NPM_TOKEN` is configured under Settings → Secrets and variables → Actions, and skips with a log line otherwise.
+
 ## Related
 
 - [Discussion #5932](https://github.com/deepseek-ai/deepseek-harness/discussions/5932) — local scripts hitting 401 on the Web UI

@@ -138,6 +138,10 @@ scripts/             prepublishOnly और CI द्वारा उपयोग
 
 `v*` टैग पुश करने पर `.github/workflows/publish.yml` चलता है; यदि रिपॉज़िटरी secret `NPM_TOKEN` सेट नहीं है तो वर्कफ़्लो प्रकाशन छोड़ देता है और लॉग में बताता है। मैन्युअल प्रकाशन (ऊपर) अभी भी मान्य है।
 
+## Releasing
+
+रिलीज़ एक ही कमांड से: `npm run release -- patch|minor|major` (केवल पूर्वावलोकन के लिए `--dry-run` जोड़ें, कुछ भी नहीं बदलता)। पहले पूरी जाँच (टेस्ट, सिंटैक्स, पैकेजिंग) चलती है और विफल होने पर कुछ भी बदले बिना रुक जाती है; फिर संस्करण बढ़ता है, कमिट, टैग और पुश होते हैं। टैग `.github/workflows/publish.yml` को चलाता है, जो Settings → Secrets and variables → Actions में रिपॉज़िटरी secret `NPM_TOKEN` होने पर npm पर प्रकाशित करता है, अन्यथा प्रकाशन छोड़कर लॉग में बताता है।
+
 ## Related
 
 - [Discussion #5932](https://github.com/deepseek-ai/deepseek-harness/discussions/5932) — स्थानीय स्क्रिप्ट को Web UI पर 401
