@@ -25,22 +25,38 @@ if (!KINDS.includes(bump)) {
 	process.exit(1);
 }
 
-/** Run one command in the repository root with inherited stdio. */
+/**
+ * The npm CLI entry to re-enter through Node, so arguments never round-trip
+ * through a platform shell (on Windows `npm` is a `.cmd` shim, and passing an
+ * argument array through `cmd.exe` mangles messages such as `%s`).
+ */
+const npmCli = process.env.npm_execpath;
+
+/**
+ * Run one command in the repository root with inherited stdio.
+ * npm goes through `node <npm-cli.js>`; anything else is an ordinary executable.
+ * @param {string} command - executable or `npm`.
+ * @param {string[]} args - arguments, never shell-quoted.
+ */
 function run(command, args) {
-	execFileSync(command, args, {
-		cwd: process.cwd(),
-		stdio: 'inherit',
-		shell: process.platform === 'win32',
-	});
+	if (command === 'npm') {
+		if (npmCli === undefined) {
+			throw new Error('run this through `npm run release -- <patch|minor|major>` so the npm CLI path is available');
+		}
+		execFileSync(process.execPath, [npmCli, ...args], { cwd: process.cwd(), stdio: 'inherit' });
+		return;
+	}
+	execFileSync(command, args, { cwd: process.cwd(), stdio: 'inherit' });
 }
 
-/** Run one command and return its trimmed stdout. */
+/**
+ * Run one command and return its trimmed stdout.
+ * @param {string} command - executable.
+ * @param {string[]} args - arguments.
+ * @returns {string} trimmed stdout.
+ */
 function output(command, args) {
-	return execFileSync(command, args, {
-		cwd: process.cwd(),
-		encoding: 'utf8',
-		shell: process.platform === 'win32',
-	}).trim();
+	return execFileSync(command, args, { cwd: process.cwd(), encoding: 'utf8' }).trim();
 }
 
 /** The package version right now. */
