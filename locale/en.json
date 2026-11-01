@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "GUI Auth URL",
-    "description": "Expose the running DeepSeek Harness Web GUI's authenticated URL as an agent tool, so browser automation can open the GUI instead of hitting 401."
+    "title": "Temporary Authenticated DSH Web",
+    "description": "Expose the running DeepSeek Harness Web GUI's authenticated URL to agents (gui_auth_url), and provide per-session temporary authenticated DSH Web instances: the /dsh-web command (start when absent, restart in place while keeping installed plugins) plus the dsh_web_start / dsh_web_restart tools — own process, throwaway DSH_HOME, own port, sessions never disturb each other."
   }
 }

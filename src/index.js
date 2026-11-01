@@ -1,14 +1,16 @@
 /**
  * @module dsh-gui-auth-url
  *
- * Expose the running Web GUI's authenticated address to the agent.
+ * Expose the running Web GUI's authenticated address to the agent and to the
+ * person using that GUI.
  *
  * Why this exists: `dsh --profile web` mints a random launch token per process
  * and prints it once. The Desktop edition starts its own Host process and never
  * prints it, so browser automation opening `http://127.0.0.1:<port>/` fails with
  * `401 dsh web authentication required`. This plugin asks the *official* Host
  * API (`connection.authenticatedUrl`) for the same URL `dsh web` prints, then
- * hands it to the model as a tool result.
+ * hands it to the model as a tool result and to a human as the `/gui-auth`
+ * slash command (which also opens the default browser).
  *
  * It deliberately never reads the cookie-signing secret in
  * `$DSH_HOME/.credentials.yaml` and never mints a cookie itself: the returned
@@ -17,6 +19,10 @@
  */
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { resolveGuiAuthUrl } from './auth-url.js';
+import { resolveDeepSeekApiKey } from './api-key.js';
+import { COMMAND_NAME, registerWebGuiCommand } from './command.js';
+import { RESTART_TOOL_NAME, TOOL_NAME as ISOLATED_TOOL_NAME, registerIsolatedRestartTool, registerIsolatedStartTool } from './isolated-tool.js';
+import { createIsolatedWebGui, sweepStaleHomes } from './isolated-web.js';
 
 export const name = 'gui-auth-url';
 
@@ -24,28 +30,52 @@ export const name = 'gui-auth-url';
 export const inject = ['connection', 'tools'];
 
 /**
- * Cordis config. Only `allowPublic: true` may attach the launch token to a
- * non-loopback advertised host. Absent config and every other value stay closed.
+ * Cordis config. `allowPublic: true` may attach the launch token to a
+ * non-loopback advertised host; `openBrowser: false` makes the human command
+ * report the URL without opening a browser; `shareApiKey: false` stops the
+ * default behaviour of passing this process's DeepSeek API key to the isolated
+ * Web GUI (on by default, so the isolated window can talk to the model without a
+ * separate login); `maxInstances` caps how many isolated hosts may run at once
+ * across sessions (default 4), because every host is a whole `dsh web` process.
+ * Absent config stays closed, browser-opening, key-sharing, and capped at 4.
  */
 export const Config = {
 	'~standard': {
 		version: 1,
 		vendor: 'dsh-gui-auth-url',
 		validate(value) {
-			if (value === undefined || value === null) return { value: { allowPublic: false } };
+			const defaults = { allowPublic: false, openBrowser: true, shareApiKey: true, maxInstances: 4 };
+			if (value === undefined || value === null) return { value: defaults };
 			if (typeof value !== 'object' || Array.isArray(value)) {
 				return { issues: [{ message: 'config must be an object' }] };
 			}
 			const keys = Object.keys(value);
 			for (const key of keys) {
-				if (key !== 'allowPublic') {
+				if (key !== 'allowPublic' && key !== 'openBrowser' && key !== 'shareApiKey' && key !== 'maxInstances') {
 					return { issues: [{ message: `unknown config key ${key}`, path: [key] }] };
 				}
 			}
 			if ('allowPublic' in value && typeof value.allowPublic !== 'boolean') {
 				return { issues: [{ message: 'allowPublic must be a boolean', path: ['allowPublic'] }] };
 			}
-			return { value: { allowPublic: value.allowPublic === true } };
+			if ('openBrowser' in value && typeof value.openBrowser !== 'boolean') {
+				return { issues: [{ message: 'openBrowser must be a boolean', path: ['openBrowser'] }] };
+			}
+			if ('shareApiKey' in value && typeof value.shareApiKey !== 'boolean') {
+				return { issues: [{ message: 'shareApiKey must be a boolean', path: ['shareApiKey'] }] };
+			}
+			if ('maxInstances' in value
+				&& (!Number.isSafeInteger(value.maxInstances) || value.maxInstances < 1 || value.maxInstances > 32)) {
+				return { issues: [{ message: 'maxInstances must be an integer between 1 and 32', path: ['maxInstances'] }] };
+			}
+			return {
+				value: {
+					allowPublic: value.allowPublic === true,
+					openBrowser: value.openBrowser !== false,
+					shareApiKey: value.shareApiKey !== false,
+					maxInstances: value.maxInstances ?? 4,
+				},
+			};
 		},
 	},
 };
@@ -59,17 +89,29 @@ const DESCRIPTION = '返回当前正在运行的 DeepSeek Harness Web GUI 的合
 	+ '。当需要打开/刷新/截图/验证本机 GUI、而直接访问 http://127.0.0.1:<port>/ 得到 '
 	+ '`401 dsh web authentication required` 时调用本工具，然后把返回的 url 交给浏览器或 HTTP 客户端。'
 	+ '无参数。工具结果就是可直接打开的 url 文本；程序化调用另可读到 origin、protocol、host、port、secure 字段。'
+	+ '人类用户可在 GUI 输入框里输入 `/' + COMMAND_NAME + '`：插件会按会话起一个临时鉴权 DSH Web（临时 DSH_HOME + 独立端口），没有就启动、有就原地重启，并用默认浏览器打开它。'
+	+ '该临时实例登记为当前会话的后台任务：桌面端会话顶部会一直显示“运行中”并可随时停止，归档会话时会提示它仍在运行；'
+	+ '并默认把当前桌面端的 DEEPSEEK_API_KEY 复制给实例（配置 shareApiKey: false 可关闭），因此隔离窗口可直接对话。'
+	+ '注意：本工具返回的是当前进程这一份地址；`/' + COMMAND_NAME + '` 与 `' + ISOLATED_TOOL_NAME
+	+ '` 返回的是另起的临时鉴权 DSH Web 地址，两者不同（需要在不影响当前会话的前提下验证新东西时用它们）。'
 	+ '注意：url 内含本进程的临时启动令牌，只在当前进程存活期间有效；不要写入日志或提交到仓库。'
+	+ '在临时实例里装了需要重启才生效的插件后，用 `/' + COMMAND_NAME + ' restart`（或 `' + RESTART_TOOL_NAME + '`）原地重启：临时 DSH_HOME 保留，插件与配置不会丢。'
 	+ '成功调用仍会把该令牌写入会话，并随后续模型请求送出。'
 	+ '非回环地址默认拒绝；只有本插件 Cordis 配置显式 allowPublic 为 true 时才返回。';
 
 /**
- * Mount the GUI auth URL tool.
+ * Mount the read-only agent tool, and — when the composition has a job registry
+ * — the temporary authenticated DSH Web: the human `/dsh-web` command plus the
+ * agent's `dsh_web_start` / `dsh_web_restart` tools, which share one instance
+ * manager.
  * @param {object} ctx - Host plugin context.
- * @param {{allowPublic?: boolean}} [config] - validated plugin config.
+ * @param {{allowPublic?: boolean, openBrowser?: boolean, shareApiKey?: boolean, maxInstances?: number}} [config] - validated plugin config.
  */
 export function apply(ctx, config = {}) {
 	const allowPublic = config?.allowPublic === true;
+	const openBrowser = config?.openBrowser !== false;
+	const shareApiKey = config?.shareApiKey !== false;
+	const maxInstances = config?.maxInstances;
 	ctx.tools.register(defineTool({
 		name: 'gui_auth_url',
 		description: DESCRIPTION,
@@ -79,4 +121,24 @@ export function apply(ctx, config = {}) {
 			return resolveGuiAuthUrl(ctx, { allowPublic });
 		},
 	}));
+
+	const jobs = ctx.get?.('jobs') ?? ctx.jobs;
+	if (jobs === undefined || typeof jobs.start !== 'function') return;
+	if (typeof ctx.effect === 'function') {
+		// Reclaim homes and hosts left behind by a crashed or reloaded Desktop process.
+		void sweepStaleHomes().catch(() => {});
+	}
+	const gui = createIsolatedWebGui({
+		jobs,
+		...(shareApiKey ? { resolveApiKey: () => resolveDeepSeekApiKey(ctx) } : {}),
+		...(maxInstances === undefined ? {} : { maxInstances }),
+	});
+	registerWebGuiCommand(ctx, { openBrowser, shareApiKey, gui });
+	registerIsolatedStartTool(ctx, { gui });
+	registerIsolatedRestartTool(ctx, { gui });
+	if (typeof ctx.effect === 'function') {
+		ctx.effect(() => () => {
+			void gui.dispose();
+		}, 'gui-auth-url isolated Web GUI lifecycle');
+	}
 }

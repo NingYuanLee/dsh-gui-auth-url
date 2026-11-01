@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "GUI 鉴权地址",
-    "description": "把当前运行的 DeepSeek Harness Web GUI 的合法带 token 地址暴露成 agent 工具，浏览器自动化可直接打开，不再撞 401。"
+    "title": "临时鉴权 DSH Web",
+    "description": "把当前 DeepSeek Harness Web GUI 的合法带 token 地址交给 agent（gui_auth_url），并提供按会话隔离的临时鉴权 DSH Web：/dsh-web 命令（没有就启动、有就原地重启并保留已装插件）与 dsh_web_start / dsh_web_restart 工具——独立进程、临时 DSH_HOME、独立端口，各会话互不干扰。"
   }
 }

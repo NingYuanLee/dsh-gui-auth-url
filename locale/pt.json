@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "URL de autenticação da GUI",
-    "description": "Expõe a URL autenticada da GUI web do DeepSeek Harness em execução como ferramenta do agente, para que a automação do navegador não receba 401."
+    "title": "DSH Web autenticado temporário",
+    "description": "Expõe a URL autenticada da GUI web do DeepSeek Harness em execução ao agente (gui_auth_url) e oferece instâncias temporárias de DSH Web autenticado isoladas por sessão: o comando /dsh-web (inicia se não existir, reinicia no lugar mantendo os complementos instalados) e as ferramentas dsh_web_start / dsh_web_restart — processo, DSH_HOME temporário e porta próprios; as sessões não se afetam entre si."
   }
 }

@@ -1,20 +1,22 @@
 {
   "name": "dsh-gui-auth-url",
-  "version": "0.2.2",
-  "displayName": "GUI Auth URL",
-  "description": "Expose the running DeepSeek Harness Web GUI's authenticated URL as an agent tool, so browser automation can open the GUI instead of failing with 401.",
+  "version": "0.7.0",
+  "displayName": "Temporary Authenticated DSH Web",
+  "description": "Expose the running DeepSeek Harness Web GUI's authenticated URL to agents, and provide per-session temporary DSH Web instances (own process, throwaway DSH_HOME, own port) from the /dsh-web command or the dsh_web_start / dsh_web_restart tools.",
   "license": "MIT",
   "author": "NingYuanLee",
   "type": "module",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
+    "client.js",
     "cordis.patch.yml",
     "locale",
     "icon.svg",
@@ -25,7 +27,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check src/index.js && node --check src/auth-url.js",
+    "check": "node --check src/index.js && node --check src/auth-url.js && node --check src/api-key.js && node --check src/command.js && node --check src/isolated-tool.js && node --check src/isolated-web.js && node --check client.js",
     "check:pack": "node scripts/check-pack.mjs",
     "prepublishOnly": "npm test && npm run check && npm run check:pack"
   },
@@ -52,7 +54,9 @@
     "web-gui",
     "browser-automation",
     "authenticated-url",
-    "agent-tool"
+    "agent-tool",
+    "slash-command",
+    "human-command"
   ],
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
@@ -62,6 +66,9 @@
     "manifestVersion": 1,
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   },
   "peerDependencies": {

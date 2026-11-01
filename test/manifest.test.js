@@ -19,6 +19,15 @@ test('declares an installable bundle with the current manifest version', () => {
 	assert.ok(existsSync(join(root, 'cordis.patch.yml')));
 });
 
+test('declares the web client half that adds command faces', () => {
+	assert.equal(pkg.dsh?.client?.platform, 'web');
+	assert.equal(pkg.exports?.['./client'], './client.js');
+	assert.ok(pkg.files?.includes('client.js'), 'client.js is published');
+	const client = readFileSync(join(root, 'client.js'), 'utf8');
+	assert.match(client, /__ModuleLoader__\.load/u);
+	assert.match(client, /PLUGIN_ID = 'dsh-gui-auth-url'/u);
+});
+
 test('declares the verified dsh and node ranges', () => {
 	assert.equal(pkg.engines?.dsh, '>=0.2.1-rc.2 <0.3.0-0');
 	assert.match(pkg.engines?.node ?? '', /22\.19/u);

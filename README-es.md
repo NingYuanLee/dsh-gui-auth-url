@@ -61,6 +61,10 @@ La herramienta `gui_auth_url` no recibe parámetros y devuelve:
 
 El modelo ve el texto de `url`; el resto de campos queda para llamadas programáticas. Pasa la URL a `navigate_page`, `curl` o cualquier cliente HTTP para entrar en la GUI. Es útil para que el agente verifique de verdad la interfaz y las RPC con chrome-devtools-mcp mientras depura DeepSeek Harness.
 
+`/dsh-web` es la mitad humana: escríbelo en el cuadro de entrada de la GUI y el complemento **lanza otro** Host de `dsh web`, con su propio `DSH_HOME` temporal y un puerto asignado por el sistema, y abre esa URL en el navegador predeterminado. No comparte nada con la sesión activa de la edición de escritorio, así que esa GUI es un lugar aislado y desechable. Volver a ejecutarlo reinicia la instancia en el sitio: conserva el DSH_HOME temporal y los complementos instalados, reutiliza el puerto y solo cambia el token de lanzamiento. La instancia es un trabajo en segundo plano de la sesión: aparece en la lista de tareas de la sesión y, al cancelarla allí, se termina el proceso y se borra el directorio temporal. Configura `openBrowser: false` en el parche del perfil cuando la máquina del Host no tenga navegador que abrir; entonces el comando solo muestra el enlace.
+
+Configura `shareApiKey: true` para entregar la `DEEPSEEK_API_KEY` disponible (primero el entorno heredado, luego el almacén de credenciales) al Host aislado como variable de entorno, de modo que pueda hablar con el modelo sin volver a iniciar sesión; la clave nunca se escribe en el directorio temporal y cada turno consume la misma cuenta.
+
 ## Security
 
 - La URL contiene el token de lanzamiento de este proceso: es una credencial equivalente a una sesión iniciada y solo funciona mientras el Host siga vivo.
