@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1
+
+- **修复：重启时旧宿主的迟到 exit 不再删除新宿主的 home 与所有权记录**。原地重启会先 kill 旧宿主，而「确认退出」允许先由 pid 从进程表消失满足，旧宿主的 `exit` 事件可能在新宿主接管同一个 `DSH_HOME` 之后才到达；原来的退出回调会无条件 `removeHome(home)`，把新宿主的临时目录连同 `.owner-records/<实例>.json` 一起删掉，下一次停止就找不到所有权记录（`the home has no readable owner marker`），进程因此无人认领。现在每个 home 有租约（`homeLeases`）：spawn 时登记，退出回调只清理仍归自己的 home，stop 确认退出后回收租约。回归测试 `a late exit from the replaced host never deletes the restarted home` 覆盖该路径。
+- **修复：Windows 上结束宿主先跑 `taskkill /T`，再回退到直接 kill 根进程**。原来的顺序是先 `child.kill()` 再让 `taskkill /T` 跑：如果启动器是 PATH 上的 `dsh.cmd`（普通 Node 安装），管理器与真实宿主之间隔着一到两个 `cmd.exe`，根进程先死会把宿主 reparent 掉，`taskkill` 再遍历时那棵树已经不存在，宿主因此成为孤儿——而管理器以为已退出，还会删掉它的临时 home。现在 `killTree` 在 `/T` 未结束前不发直接 kill，`taskkill` 起不来或报错时才回退，并有 2 秒兜底；顺序由 `killTree` 的三条单测固定，`npm run smoke --launcher=shim` 可在 shim 路径上真验证收尾。
+- **新增 `npm run smoke`**（`scripts/smoke-isolated.mjs`）：真启动一个隔离 `dsh web`、原地重启、停止，并断言临时 home 与所有权记录都清空。仅手动运行（CI、提权 shell、缺少 `dsh` 启动器时跳过），`finally` 与 `SIGINT` 都保证收尾——手写探针中断正是上次留下孤儿宿主的直接原因。
+
 ## 0.8.0
 
 - **一次性实例目录搬进 Harness home，并且只删自己建的那个目录**：临时 `DSH_HOME` 不再落在 `%TEMP%\dsh-web-gui-*`，改为 `<DSH_HOME>/dsh-gui-auth-url/instances/run-*`——位置在运行时按每台机器自己的 `$DSH_HOME`（缺省 `~/.dsh`）解析，插件里没有任何写死路径。目录用**非递归 `mkdir`** 独占创建（重名即换名，绝不认领已有目录）；所有权记录写在实例根的 `.owner-records/<实例>.json`，不放在宿主自己的 home 里——实测真实宿主第二次启动会清掉 home 根下的未知文件，标记放在 home 里会被一起清掉。记录以 `wx` 独占写入并带随机实例令牌，宿主每次输出 URL 后再幂等重建一次；原地重启从第一次 kill 到替换实例跑起来之间全程持有该实例，失败重试期间也不会被子进程退出误删。正常停机删除前必须匹配**本进程的创建记录与令牌**；跨进程遗留走单独的 `removeStaleInstanceHome`，只按标记与真实路径校验。根路径逐级创建并校验：`dsh-gui-auth-url`、`instances` 任一级已是 junction/符号链接就拒绝，`realpath` 脱离父级也拒绝。调用方即使把路径算错（空变量、误用只读的 `$home`、符号链接绕路），最坏结果是报错，而不是删掉用户目录。启动清扫同时覆盖新根与旧的 `%TEMP%\dsh-web-gui-*`，历史残留仍在首次启动时回收；旧目录没有实例令牌，只按宿主标记判定，且**仅在记录到的 pid 仍存活时**才校验端口归属（pid 已死时没有可归属的活进程，直接进入清理）。宿主存活时必须先证明「记录 pid 确实是监听所探测端点（`127.0.0.1:port`，地址与端口精确匹配）的进程」，解析有歧义或平台不支持就一律不终止；验证通过后还要等待其真正退出，退出未确认则目录与进程都保留。

@@ -10,6 +10,7 @@ import {
 	HOME_PREFIX,
 	MARKER_FILENAME,
 	createIsolatedWebGui,
+	killTree,
 	parseLaunchedUrl,
 	parseNetstatListeners,
 	resolveLauncher,
@@ -353,6 +354,54 @@ test('restart replaces the host but keeps its temporary home', async () => {
 
 	await gui.stop('session-1');
 	assert.ok(removed.includes(home), 'a normal stop still removes the home');
+});
+
+test('a late exit from the replaced host never deletes the restarted home', async () => {
+	const calls = [];
+	const removed = [];
+	// A killed host whose `exit` event has not been delivered yet: the manager
+	// proves the exit by the pid disappearing, and the event arrives afterwards.
+	const spawn = (command, args, options) => {
+		const child = fakeChild();
+		// A pid lets the manager prove the exit by the process disappearing while
+		// the child's own `exit` event is still in flight.
+		child.pid = 987654;
+		calls.push({ command, args, options, child });
+		child.kill = () => {
+			child.killed = true;
+			return true;
+		};
+		process.nextTick(() => {
+			child.stdout.emit('data', Buffer.from('dsh web: http://127.0.0.1:4123/?token=t\n'));
+		});
+		return child;
+	};
+	const gui = createIsolatedWebGui({
+		jobs: fakeJobs(),
+		spawn,
+		launcher: { command: 'dsh', args: [], env: {} },
+		pollMs: 5,
+		stopTimeoutMs: 50,
+		waitGone: async () => true,
+		makeHome: async () => join(tmpdir(), `${HOME_PREFIX}late-exit`),
+		removeHome: async (home) => {
+			removed.push(home);
+		},
+	});
+	await gui.ensure('session-1');
+	const restarted = await gui.restart('session-1');
+	assert.deepEqual(removed, [], 'the restarted home survives the replacement');
+
+	// The replaced host's exit lands only now: it must not clean a home the
+	// replacement already owns, or the next stop cites a deleted ownership record.
+	calls[0].child.emit('exit', 0);
+	await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+	assert.deepEqual(removed, [], 'a late exit from the replaced host deletes nothing');
+
+	calls[1].child.emit('exit', 0);
+	await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+	assert.deepEqual(removed, [calls[1].options.env.DSH_HOME], 'the current host still cleans its own home');
+	assert.equal(restarted.restarted, true);
 });
 
 test('a restart falls back to an OS-assigned port when the old one is unavailable', async () => {
@@ -1241,4 +1290,46 @@ test('status reports the running instance, its facts and the global counters', a
 	await gui.stop('session-1');
 	assert.equal(gui.status('session-1').running, false, 'a stopped instance is not running');
 	assert.equal(gui.status('session-1').runningCount, 0);
+});
+test('killTree captures the process tree before the root is killed on Windows', () => {
+	const events = [];
+	const child = { pid: 4242, kill: () => events.push('direct') };
+	const killer = new EventEmitter();
+	killTree(child, {
+		platform: 'win32',
+		spawn: (command, args) => {
+			events.push(command + ' ' + args.join(' '));
+			return killer;
+		},
+	});
+	assert.deepEqual(events, ['taskkill /PID 4242 /T /F'], 'the tree kill starts while the root is still alive');
+	killer.emit('exit', 0);
+	assert.deepEqual(events, ['taskkill /PID 4242 /T /F', 'direct'], 'the direct kill only follows the tree kill');
+});
+
+test('killTree kills the child directly off Windows', () => {
+	const events = [];
+	killTree({ pid: 4242, kill: () => events.push('direct') }, {
+		platform: 'linux',
+		spawn: () => { throw new Error('must not spawn taskkill off Windows'); },
+	});
+	assert.deepEqual(events, ['direct']);
+});
+
+test('killTree falls back to the direct kill when taskkill cannot start', () => {
+	const events = [];
+	killTree({ pid: 4242, kill: () => events.push('direct') }, {
+		platform: 'win32',
+		spawn: () => { throw new Error('taskkill missing'); },
+	});
+	assert.deepEqual(events, ['direct']);
+});
+
+test('killTree falls back to the direct kill when the tree kill errors', () => {
+	const events = [];
+	const child = { pid: 4242, kill: () => events.push('direct') };
+	const killer = new EventEmitter();
+	killTree(child, { platform: 'win32', spawn: () => killer });
+	killer.emit('error', new Error('denied'));
+	assert.deepEqual(events, ['direct'], 'a failed tree kill still ends the child');
 });

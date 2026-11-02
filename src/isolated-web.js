@@ -200,28 +200,59 @@ export function isProcessAlive(pid) {
 }
 
 /**
- * End one child and everything it started. A DSH host may own terminal or
- * helper processes, and `child.kill()` alone leaves those behind on Windows;
- * `taskkill /T` takes the tree down.
+ * End one child and everything it started.
+ *
+ * On Windows the tree must be captured **while its root is still alive**: a
+ * launcher shim puts one or two `cmd.exe` processes between this manager and the
+ * real host, and killing the root first reparents the descendants, so a
+ * `taskkill /T` that starts afterwards walks a tree that no longer exists and
+ * leaves the host running. So the direct kill is only issued once `taskkill`
+ * exits (or cannot be started at all), never before it.
+ *
  * @param {{pid?: number, kill?: Function}|undefined} child - the spawned host.
+ * @param {object} [options] - test seams.
+ * @param {NodeJS.Platform} [options.platform] - platform override.
+ * @param {Function} [options.spawn] - process spawner override.
  */
-function terminateTree(child) {
+export function killTree(child, options = {}) {
 	if (child === null || child === undefined) return;
-	const pid = child?.pid;
-	if (process.platform === 'win32' && Number.isSafeInteger(pid) && pid > 0) {
+	const platform = options.platform ?? process.platform;
+	const spawnProcess = options.spawn ?? spawn;
+	const pid = Number(child?.pid);
+	const directKill = () => {
 		try {
-			const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-			killer?.once?.('error', () => {});
+			child?.kill?.();
+		} catch {
+			// Already gone.
+		}
+	};
+	if (platform === 'win32' && Number.isSafeInteger(pid) && pid > 0) {
+		try {
+			const killer = spawnProcess('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+			let settled = false;
+			const afterTaskkill = () => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(guard);
+				directKill();
+			};
+			// A taskkill that neither exits nor errors must not strand the child forever.
+			const guard = setTimeout(afterTaskkill, 2000);
+			guard?.unref?.();
+			killer?.once?.('exit', afterTaskkill);
+			killer?.once?.('error', afterTaskkill);
 			killer?.unref?.();
+			return;
 		} catch {
 			// Fall through to the direct kill below.
 		}
 	}
-	try {
-		child?.kill?.();
-	} catch {
-		// Already gone.
-	}
+	directKill();
+}
+
+/** Backstop name kept for the internal call sites: one child, its whole tree. */
+function terminateTree(child) {
+	killTree(child);
 }
 
 /** Record which processes own one temporary home; best-effort, never blocks startup. */
@@ -545,6 +576,15 @@ export function createIsolatedWebGui(options = {}) {
 	 * decision cannot be lost to closure timing.
 	 */
 	const retainedHomes = new Set();
+	/**
+	 * Which child currently owns each home, keyed like retainedHomes. A replaced
+	 * host's `exit` event can arrive after its replacement is already running:
+	 * confirmed exit is satisfied by the pid disappearing first, and the manager
+	 * releases retention as soon as the replacement announces its URL. Without a
+	 * lease, that late exit deletes the live replacement's home - and the
+	 * ownership record the next stop must cite - leaving a host nobody can prove.
+	 */
+	const homeLeases = new Map();
 
 	/** Job status, or `gone` when the registry no longer knows it (or fences the caller out). */
 	function statusOf(id, caller) {
@@ -580,6 +620,10 @@ export function createIsolatedWebGui(options = {}) {
 			stdio: ['ignore', 'pipe', 'pipe'],
 			windowsHide: true,
 		});
+		// Claim this home for this child before any exit can be delivered.
+		const homeKey = resolve(home).toLowerCase();
+		const lease = Symbol('home-lease');
+		homeLeases.set(homeKey, lease);
 		writeMarker(home, child?.pid);
 		child?.stdout?.on?.('data', (chunk) => {
 			captured.text += chunk.toString();
@@ -622,6 +666,11 @@ export function createIsolatedWebGui(options = {}) {
 		// an in-place restart keeps the home for the *old* child while the new one
 		// still owns its own lifecycle.
 		void exited.then(() => {
+			// Only the child that still owns this home may clean it. A replaced host's
+			// exit lands after the replacement claimed the lease; deleting then would
+			// remove a running host's home and its ownership record.
+			if (homeLeases.get(homeKey) !== lease) return;
+			homeLeases.delete(homeKey);
 			if (!shouldRetain()) removeHome(home).catch(() => {});
 		});
 		return {
@@ -928,6 +977,9 @@ export function createIsolatedWebGui(options = {}) {
 			// share one home.
 			throw new Error(`the isolated host did not confirm exit; keeping ${instance.home} and refusing to continue`);
 		}
+		// This manager settled the child itself; a later exit event must not be able
+		// to clean a home that (on a restart) a replacement now owns.
+		homeLeases.delete(homeKey);
 		// The child has exited: a normal stop releases the home and disposes of it;
 		// a restart keeps the retention until its replacement is running.
 		if (!keepHome) {
