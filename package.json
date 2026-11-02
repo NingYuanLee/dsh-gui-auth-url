@@ -29,6 +29,7 @@
     "test": "node --test test/*.test.js",
     "check": "node --check src/index.js && node --check src/auth-url.js && node --check src/api-key.js && node --check src/command.js && node --check src/launch-options.js && node --check src/instance-home.js && node --check src/isolated-tool.js && node --check src/isolated-web.js && node --check client.js",
     "check:pack": "node scripts/check-pack.mjs",
+    "smoke": "node scripts/smoke-isolated.mjs",
     "prepublishOnly": "npm test && npm run check && npm run check:pack",
     "preversion": "npm run prepublishOnly",
     "release": "node scripts/release.mjs"
