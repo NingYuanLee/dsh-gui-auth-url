@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.2
+
+- **支持 DeepSeek Harness 0.2.2 预发布版**：`@deepseek-ai/cordis` peer 区间放宽为 `>=4.0.4 <5.0.0`，同时覆盖 0.2.1 的 4.0.5 与 0.2.2 的 4.1.0；`@deepseek-ai/dsh-tools` 同时接受 `0.2.1` 与 `0.2.2-0` 起的预发布区间。运行时无改动：插件只用到 `defineTool` 与 `ctx.tools.register`，dsh-tools 在 0.2.2 重构后仍保留这两个入口；`connection.authenticatedUrl`、`jobs`、`commands.register`、`commandUi` 客户端契约在两版一致或仅新增可选字段。已用 0.2.2-rc.1 内核验证加载与测试。
+
 ## 0.8.1
 
 - **修复：重启时旧宿主的迟到 exit 不再删除新宿主的 home 与所有权记录**。原地重启会先 kill 旧宿主，而「确认退出」允许先由 pid 从进程表消失满足，旧宿主的 `exit` 事件可能在新宿主接管同一个 `DSH_HOME` 之后才到达；原来的退出回调会无条件 `removeHome(home)`，把新宿主的临时目录连同 `.owner-records/<实例>.json` 一起删掉，下一次停止就找不到所有权记录（`the home has no readable owner marker`），进程因此无人认领。现在每个 home 有租约（`homeLeases`）：spawn 时登记，退出回调只清理仍归自己的 home，stop 确认退出后回收租约。回归测试 `a late exit from the replaced host never deletes the restarted home` 覆盖该路径。

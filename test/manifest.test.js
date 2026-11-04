@@ -35,7 +35,7 @@ test('declares the verified dsh and node ranges', () => {
 });
 
 test('declares a dsh-tools peer range for the current generation', () => {
-	assert.equal(pkg.peerDependencies?.['@deepseek-ai/dsh-tools'], '>=0.2.1-0 <0.3.0');
+	assert.equal(pkg.peerDependencies?.['@deepseek-ai/dsh-tools'], '>=0.2.1-0 <0.3.0-0 || >=0.2.2-0 <0.3.0-0');
 });
 
 test('publishes locale display metadata for every supported language', () => {

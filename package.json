@@ -1,6 +1,6 @@
 {
   "name": "dsh-gui-auth-url",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "displayName": "Temporary Authenticated DSH Web",
   "description": "Expose the running DeepSeek Harness Web GUI's authenticated URL to agents, and provide per-session temporary DSH Web instances (own process, throwaway DSH_HOME, own port) from the /dsh-web command or the dsh_web_start / dsh_web_restart tools.",
   "license": "MIT",
@@ -75,7 +75,7 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "~4.0.4",
-    "@deepseek-ai/dsh-tools": ">=0.2.1-0 <0.3.0"
+    "@deepseek-ai/cordis": ">=4.0.4 <5.0.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.1-0 <0.3.0-0 || >=0.2.2-0 <0.3.0-0"
   }
 }
