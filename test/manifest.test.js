@@ -29,7 +29,7 @@ test('declares the web client half that adds command faces', () => {
 });
 
 test('declares the verified dsh and node ranges', () => {
-	assert.equal(pkg.engines?.dsh, '>=0.2.1-rc.2 <0.3.0-0');
+	assert.equal(pkg.engines?.dsh, '>=0.2.1-rc.2 <0.3.0-0 || >=0.2.2-0 <0.3.0-0');
 	assert.match(pkg.engines?.node ?? '', /22\.19/u);
 	assert.equal(pkg.packageManager, 'pnpm@11.7.0');
 });

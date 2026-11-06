@@ -1,9 +1,6 @@
 # dsh-gui-auth-url
 
-[![CI](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml/badge.svg)](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.1--rc.2%20%3C0.3.0--0-6f42c1)](package.json)
-[![GitHub stars](https://img.shields.io/github/stars/NingYuanLee/dsh-gui-auth-url?style=social)](https://github.com/NingYuanLee/dsh-gui-auth-url/stargazers)
+[![CI](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml/badge.svg)](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/dsh-gui-auth-url.svg)](https://www.npmjs.com/package/dsh-gui-auth-url) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Node >=22.19](https://img.shields.io/badge/node-%3E%3D22.19.0-339933.svg)](#compatibility) [![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.1--rc.2%20%3C0.3.0--0%20%7C%7C%20%3E%3D0.2.2--0%20%3C0.3.0--0-6f42c1)](#compatibility) [![topic: dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-6f42c1.svg)](https://github.com/topics/dsh-plugin) [![GitHub stars](https://img.shields.io/github/stars/NingYuanLee/dsh-gui-auth-url?style=social)](https://github.com/NingYuanLee/dsh-gui-auth-url/stargazers) [![powered by dsh](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
 
 > Third-party community plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Not an official DeepSeek product. MIT licensed.
 
@@ -132,9 +129,9 @@ Agents get five entries, and they are not interchangeable: `gui_auth_url` return
 
 | Item | Value |
 |---|---|
-| dsh | `>=0.2.1-rc.2 <0.3.0-0` |
+| dsh | `>=0.2.1-rc.2 <0.3.0-0 \|\| >=0.2.2-0 <0.3.0-0` |
 | Node | `>=22.19.0` |
-| Verified on | dsh `0.2.1-rc.2`, Windows x64, desktop and web profiles |
+| Verified on | dsh `0.2.1-rc.2` and `0.2.2-rc.1`, Windows x64, desktop and web profiles |
 | Web combination | needs the `connection` service; a profile without a Web GUI reports a clear error |
 
 Display metadata (`locale/*.json` plus the exported `./icon`) makes the Plugins page and Settings show a proper title, description and artwork instead of the raw package id. The plugin does not require a build step: it ships plain ESM JavaScript.

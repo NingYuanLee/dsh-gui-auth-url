@@ -1,7 +1,6 @@
 # dsh-gui-auth-url
 
-[![CI](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml/badge.svg)](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml/badge.svg)](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/dsh-gui-auth-url.svg)](https://www.npmjs.com/package/dsh-gui-auth-url) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Node >=22.19](https://img.shields.io/badge/node-%3E%3D22.19.0-339933.svg)](#compatibility) [![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.1--rc.2%20%3C0.3.0--0%20%7C%7C%20%3E%3D0.2.2--0%20%3C0.3.0--0-6f42c1)](#compatibility) [![topic: dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-6f42c1.svg)](https://github.com/topics/dsh-plugin) [![GitHub stars](https://img.shields.io/github/stars/NingYuanLee/dsh-gui-auth-url?style=social)](https://github.com/NingYuanLee/dsh-gui-auth-url/stargazers) [![powered by dsh](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
 
 > Plugin comunitario de terceros para [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). No es un producto oficial de DeepSeek. MIT.
 
@@ -126,9 +125,9 @@ Además, al escribir `/dsh-web` completo, el menú `/` puede dejar el resaltado 
 
 | Elemento | Valor |
 |---|---|
-| dsh | `>=0.2.1-rc.2 <0.3.0-0` |
+| dsh | `>=0.2.1-rc.2 <0.3.0-0 \|\| >=0.2.2-0 <0.3.0-0` |
 | Node | `>=22.19.0` |
-| Verificado en | dsh `0.2.1-rc.2`, Windows x64, perfiles desktop y web |
+| Verificado en | dsh `0.2.1-rc.2` y `0.2.2-rc.1`, Windows x64, perfiles desktop y web |
 | Combinación web | requiere el servicio `connection`; un perfil sin GUI web devuelve un error claro |
 
 Los metadatos de presentación (`locale/*.json` y el `./icon` exportado) hacen que la página de Plugins y Settings muestren título, descripción e icono en lugar del id del paquete. No hay paso de compilación: se publica JavaScript ESM.

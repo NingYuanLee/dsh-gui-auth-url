@@ -1,8 +1,6 @@
 # dsh-gui-auth-url
 
-[![CI](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml/badge.svg)](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.1--rc.2%20%3C0.3.0--0-6f42c1)](package.json)
+[![CI](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml/badge.svg)](https://github.com/NingYuanLee/dsh-gui-auth-url/actions/workflows/ci.yml) [![npm](https://img.shields.io/npm/v/dsh-gui-auth-url.svg)](https://www.npmjs.com/package/dsh-gui-auth-url) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![Node >=22.19](https://img.shields.io/badge/node-%3E%3D22.19.0-339933.svg)](#compatibility) [![dsh](https://img.shields.io/badge/dsh-%3E%3D0.2.1--rc.2%20%3C0.3.0--0%20%7C%7C%20%3E%3D0.2.2--0%20%3C0.3.0--0-6f42c1)](#compatibility) [![topic: dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-6f42c1.svg)](https://github.com/topics/dsh-plugin) [![GitHub stars](https://img.shields.io/github/stars/NingYuanLee/dsh-gui-auth-url?style=social)](https://github.com/NingYuanLee/dsh-gui-auth-url/stargazers) [![powered by dsh](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
 
 > DeepSeek Harness 第三方社区插件，非 DeepSeek 官方产品。MIT。
 
@@ -143,9 +141,9 @@ dsh plugin --profile <name> add github:NingYuanLee/dsh-gui-auth-url
 
 | 项 | 值 |
 |---|---|
-| dsh | `>=0.2.1-rc.2 <0.3.0-0` |
+| dsh | `>=0.2.1-rc.2 <0.3.0-0 \|\| >=0.2.2-0 <0.3.0-0` |
 | Node | `>=22.19.0` |
-| 验证环境 | dsh `0.2.1-rc.2`，Windows x64，desktop 与 web profile |
+| 验证环境 | dsh `0.2.1-rc.2` 与 `0.2.2-rc.1`，Windows x64，desktop 与 web profile |
 | Web 组合 | 需要 `connection` 服务；无 Web GUI 的 profile 会给出明确错误 |
 
 展示元数据（`locale/*.json` + 导出的 `./icon`）让 Plugins 页与 Settings 显示正常的标题、描述和图标，而不是原始包 id。插件无构建步骤，直接发布 ESM JavaScript。

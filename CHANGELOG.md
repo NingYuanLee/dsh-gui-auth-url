@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.3
+
+- 把 `engines.dsh` 放宽为 `>=0.2.1-rc.2 <0.3.0-0 || >=0.2.2-0 <0.3.0-0`，让声明区间覆盖本插件实测通过的 DSH 0.2.2 预发布线；原单区间写法会排除 0.2.2 预发布，而 peer 区间本就接受它。运行时无改动。
+- 统一 README 徽章行（CI、npm、MIT 许可、Node、dsh 区间、`dsh-plugin` topic、GitHub stars、powered by dsh），并让兼容性表格与声明区间一致。
+
 ## 0.8.2
 
 - **支持 DeepSeek Harness 0.2.2 预发布版**：`@deepseek-ai/cordis` peer 区间放宽为 `>=4.0.4 <5.0.0`，同时覆盖 0.2.1 的 4.0.5 与 0.2.2 的 4.1.0；`@deepseek-ai/dsh-tools` 同时接受 `0.2.1` 与 `0.2.2-0` 起的预发布区间。运行时无改动：插件只用到 `defineTool` 与 `ctx.tools.register`，dsh-tools 在 0.2.2 重构后仍保留这两个入口；`connection.authenticatedUrl`、`jobs`、`commands.register`、`commandUi` 客户端契约在两版一致或仅新增可选字段。已用 0.2.2-rc.1 内核验证加载与测试。
