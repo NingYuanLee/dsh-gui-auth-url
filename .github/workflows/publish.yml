@@ -1,35 +1,19 @@
 name: Publish
 
-# Publishing runs through npm trusted publishing (OIDC): the workflow carries no
-# npm token and needs no repository secret. npm accepts the publish when the
-# package's "Trusted publishing" entry names this repository and this workflow
-# file, and exchanges the workflow's OIDC token for a short-lived publish token.
-#
-# One-time prerequisite on npmjs.com -> Packages -> dsh-gui-auth-url ->
-# Settings -> Trusted publishing -> GitHub Actions:
-#   Organization or user: NingYuanLee
-#   Repository:           dsh-gui-auth-url
-#   Workflow filename:    publish.yml   (file name only, extension included, case must match exactly)
-#   Environment name:     (leave empty)
-#
-# The same entry can be created from the CLI (npm >= 11.15.0, account 2FA on,
-# package already on the registry):
-#   npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish
-#
-# Trusted publishing needs npm CLI >= 11.5.1 and Node >= 22.14.0; the runner
-# below pins Node 24 (npm 11.16), which satisfies both. Provenance is attached
-# automatically, so no --provenance flag is needed.
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
   workflow_dispatch:
 
+# npm trusted publishing (OIDC).
+# - `id-token: write` lets the runner request the short-lived OIDC token that
+#   npm exchanges for a publish token; it is the only permission trusted
+#   publishing needs and it is why no npm token is configured anywhere.
+# - `contents: write` stays for creating the GitHub Release and uploading the
+#   packed tarball.
 permissions:
-  # id-token: write is the OIDC permission npm trusted publishing needs: it lets
-  # GitHub Actions mint the OIDC token that npm exchanges for a publish token.
   id-token: write
-  # contents: write covers creating the GitHub Release and uploading the packed
-  # tarball.
   contents: write
 
 jobs:
@@ -40,19 +24,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
           registry-url: 'https://registry.npmjs.org'
-
-      - name: Tag must match package.json
-        if: startsWith(github.ref, 'refs/tags/')
+      - run: npm ci --ignore-scripts
+      - name: Verify tag matches package version
         run: |
-          node -e "const p = require('./package.json'); const tag = process.env.GITHUB_REF_NAME ?? ''; if (!tag.startsWith('v') || tag.slice(1) !== p.version) { console.error('tag ' + tag + ' does not match package.json version ' + p.version); process.exit(1); }"
-
-      - name: Install peer dependencies for the prepublish checks
-        run: npm install --no-save @deepseek-ai/dsh-tools@0.2.1-rc.2
-
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME#v}"
+          if [ "$VERSION" != "$TAG" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package.json version $VERSION" >&2
+            exit 1
+          fi
+      - run: npm test
+      - run: npm run check
       - name: Pack the installable tarball
         run: npm pack
-
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,46 +52,22 @@ jobs:
               --generate-notes \
               "${FLAGS[@]}"
           gh release upload "$GITHUB_REF_NAME" "dsh-gui-auth-url-$VERSION.tgz" --clobber
-
       - name: Publish to npm
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          # A previous run may have published (or staged) this version already; wait
-          # for registry visibility before attempting, so re-tagging does not race.
-          for attempt in $(seq 1 15); do
-            if [ "$(npm view "dsh-gui-auth-url@$version" version 2>/dev/null || true)" = "$version" ]; then
-              echo "dsh-gui-auth-url@$version is already published; skipping"
-              exit 0
-            fi
-            sleep 2
-          done
-          if npm publish --access public --tag latest; then
-            echo "published dsh-gui-auth-url@$version"
-            exit 0
-          fi
-          # A concurrent or previously staged publish can still answer E409; treat it
-          # as done once the registry serves the version.
-          for attempt in $(seq 1 30); do
-            if [ "$(npm view "dsh-gui-auth-url@$version" version 2>/dev/null || true)" = "$version" ]; then
-              echo "publish reported an error, but $version is on the registry; treating as published"
-              exit 0
-            fi
-            sleep 4
-          done
-          echo "could not publish or verify dsh-gui-auth-url@$version"
-          exit 1
-
-      - name: Verify the tagged version is on the registry
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          for attempt in $(seq 1 30); do
-            published="$(npm view "dsh-gui-auth-url@$version" version 2>/dev/null || true)"
-            if [ "$published" = "$version" ]; then
-              echo "registry serves dsh-gui-auth-url@$version"
-              echo "latest dist-tag: $(npm view dsh-gui-auth-url dist-tags.latest 2>/dev/null || true)"
-              exit 0
-            fi
-            sleep 4
-          done
-          echo "timed out waiting for dsh-gui-auth-url@$version on the registry"
-          exit 1
+        # Trusted publishing (OIDC): the npm CLI picks up the OIDC token that
+        # GitHub mints for this workflow and exchanges it for a publish token.
+        # No npm token is stored in the repository.
+        #
+        # Prerequisite (register once per package on npmjs.com,
+        # Packages -> dsh-gui-auth-url -> Settings -> Trusted publishing):
+        #   Organization or user: NingYuanLee
+        #   Repository:           dsh-gui-auth-url
+        #   Workflow filename:    publish.yml   (file name only, matching
+        #                         .github/workflows/publish.yml exactly, case
+        #                         included)
+        #   Environment name:     leave empty
+        #
+        # The same relationship can be registered from the command line
+        # (npm 11.16 or newer, after `npm login`):
+        #   npm trust github dsh-gui-auth-url --file publish.yml \
+        #     --repo NingYuanLee/dsh-gui-auth-url --allow-publish
+        run: npm publish
