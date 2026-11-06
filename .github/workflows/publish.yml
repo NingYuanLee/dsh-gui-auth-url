@@ -28,6 +28,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci --ignore-scripts
       - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           TAG="${GITHUB_REF_NAME#v}"
@@ -46,12 +47,13 @@ jobs:
           VERSION="$(node -p "require('./package.json').version")"
           FLAGS=()
           case "$VERSION" in *-*) FLAGS+=(--prerelease) ;; esac
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" \
-              --title "dsh-gui-auth-url $GITHUB_REF_NAME" \
+          RELEASE_TAG="v$VERSION"
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" \
+              --title "dsh-gui-auth-url $RELEASE_TAG" \
               --generate-notes \
               "${FLAGS[@]}"
-          gh release upload "$GITHUB_REF_NAME" "dsh-gui-auth-url-$VERSION.tgz" --clobber
+          gh release upload "$RELEASE_TAG" "dsh-gui-auth-url-$VERSION.tgz" --clobber
       - name: Publish to npm
         # Trusted publishing (OIDC): the npm CLI picks up the OIDC token that
         # GitHub mints for this workflow and exchanges it for a publish token.
