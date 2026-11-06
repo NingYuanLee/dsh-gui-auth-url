@@ -25,8 +25,8 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-      - name: Install dependencies
-        run: npm install --no-save --ignore-scripts
+      - name: Install peer dependencies
+        run: npm install --no-save --ignore-scripts @deepseek-ai/cordis@4.1.0 @deepseek-ai/dsh-tools@0.2.2-rc.1
       - name: Verify tag matches package version
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -36,7 +36,8 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match package.json version $VERSION" >&2
             exit 1
           fi
-      - run: npm test
+      - name: Run the test suite
+        run: node --test test/*.test.js
       - run: npm run check
       - name: Pack the installable tarball
         run: npm pack
