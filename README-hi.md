@@ -201,7 +201,7 @@ trusted publisher एक बार दर्ज करना होता है
 npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish
 ```
 
-`--allow-publish` इस वर्कफ़्लो को `npm publish` चलाने की अनुमति देता है; `npm stage publish` हमेशा अनुमत रहता है। trusted publishing के लिए npm CLI ≥ 11.5.1 और Node ≥ 22.14.0 चाहिए — वर्कफ़्लो प्रकाशन से पहले अपना npm अपग्रेड कर लेता है, और provenance अपने आप जुड़ जाता है।
+`--allow-publish` इस वर्कफ़्लो को `npm publish` चलाने की अनुमति देता है; `npm stage publish` हमेशा अनुमत रहता है। trusted publishing के लिए npm CLI ≥ 11.5.1 और Node ≥ 22.14.0 चाहिए — प्रकाशन वर्कफ़्लो Node 24 (npm 11.16) पर चलता है, जो दोनों को पूरा करता है — और provenance अपने आप जुड़ जाता है।
 
 स्थानीय मशीन से प्रकाशित करने के लिए आधिकारिक तरीका अपनाएँ: `npm login --auth-type=web` दो घंटे का सेशन टोकन देता है, और प्रकाशन के समय 2FA का एक बार का कोड चाहिए:
 

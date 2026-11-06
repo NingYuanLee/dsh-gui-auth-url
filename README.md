@@ -224,7 +224,7 @@ The same entry can be created from the CLI (npm ≥ 11.15.0, account 2FA enabled
 npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish
 ```
 
-`--allow-publish` lets this workflow run `npm publish`; `npm stage publish` is always allowed. Trusted publishing needs npm CLI ≥ 11.5.1 and Node ≥ 22.14.0 — the workflow upgrades its own npm before publishing, and provenance is attached automatically.
+`--allow-publish` lets this workflow run `npm publish`; `npm stage publish` is always allowed. Trusted publishing needs npm CLI ≥ 11.5.1 and Node ≥ 22.14.0 — the publish workflow runs on Node 24 (npm 11.16), which satisfies both — and provenance is attached automatically.
 
 To publish from a local machine instead, use the official flow: `npm login --auth-type=web` gives a two-hour session token, and the publish itself needs a 2FA one-time code:
 

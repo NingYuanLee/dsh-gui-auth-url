@@ -2,7 +2,7 @@
 
 ## 未发布（Unreleased）
 
-- **发布流程改用 npm 官方 trusted publishing (OIDC)**：`.github/workflows/publish.yml` 不再读取仓库 Secret，也没有「没有令牌就跳过」的分支——`permissions` 里加 `id-token: write`，工作流直接 `npm publish`，npm 用 OIDC 换取短期发布令牌并自动附带 provenance。登记前提：npmjs.com → 包 Settings → Trusted publishing → GitHub Actions，Organization/user 填 `NingYuanLee`、Repository 填 `dsh-gui-auth-url`、Workflow filename 填 `publish.yml`（只写文件名，含 `.yml`，大小写完全一致）、Environment 留空；也可以用 CLI 一条命令登记：`npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish`（需 npm ≥ 11.15.0、账号开 2FA、包已在 registry 上；`--allow-publish` 允许 `npm publish`）。trusted publishing 要求 npm CLI ≥ 11.5.1、Node ≥ 22.14.0，而 runner 的 Node 22.19.0 自带 npm 10.9.3，因此工作流在发布前自行升级 npm。发版校验、重试、registry 复核与 GitHub Release 等原有逻辑不变。
+- **发布流程改用 npm 官方 trusted publishing (OIDC)**：`.github/workflows/publish.yml` 不再读取仓库 Secret，也没有「没有令牌就跳过」的分支——`permissions` 里加 `id-token: write`，工作流直接 `npm publish`，npm 用 OIDC 换取短期发布令牌并自动附带 provenance。登记前提：npmjs.com → 包 Settings → Trusted publishing → GitHub Actions，Organization/user 填 `NingYuanLee`、Repository 填 `dsh-gui-auth-url`、Workflow filename 填 `publish.yml`（只写文件名，含 `.yml`，大小写完全一致）、Environment 留空；也可以用 CLI 一条命令登记：`npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish`（需 npm ≥ 11.15.0、账号开 2FA、包已在 registry 上；`--allow-publish` 允许 `npm publish`）。trusted publishing 要求 npm CLI ≥ 11.5.1、Node ≥ 22.14.0，因此发布工作流固定在 Node 24（自带 npm 11.16），两者都满足。发版校验、重试、registry 复核与 GitHub Release 等原有逻辑不变。
 - **文档同步为官方两条路**：五份 README 的发布说明不再讲「仓库里配了 npm 令牌才发布」，改成 CI 走 trusted publishing (OIDC)（含上面三个登记字段与 CLI 命令），本地手动发布改为官方方式：先 `npm login --auth-type=web` 拿两小时会话令牌，再 `npm publish --access public --tag latest --otp <验证码>`（发布时由本人完成 2FA 一次性验证码授权）。运行时无改动。
 
 ## 0.8.3

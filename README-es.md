@@ -202,7 +202,7 @@ La misma entrada se puede crear desde la CLI (npm ≥ 11.15.0, 2FA de la cuenta 
 npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish
 ```
 
-`--allow-publish` permite que este flujo ejecute `npm publish`; `npm stage publish` siempre está permitido. Trusted publishing necesita npm CLI ≥ 11.5.1 y Node ≥ 22.14.0 — el flujo actualiza su propio npm antes de publicar, y el provenance se adjunta automáticamente.
+`--allow-publish` permite que este flujo ejecute `npm publish`; `npm stage publish` siempre está permitido. Trusted publishing necesita npm CLI ≥ 11.5.1 y Node ≥ 22.14.0 — el flujo de publicación se ejecuta en Node 24 (npm 11.16), que cumple ambos — y el provenance se adjunta automáticamente.
 
 Para publicar desde una máquina local, usa el flujo oficial: `npm login --auth-type=web` da un token de sesión de dos horas, y la publicación requiere un código 2FA de un solo uso:
 

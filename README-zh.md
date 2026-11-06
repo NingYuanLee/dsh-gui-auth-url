@@ -236,7 +236,7 @@ trusted publisher 需要登记一次。在 npmjs.com → Packages → `dsh-gui-a
 npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish
 ```
 
-`--allow-publish` 允许这个工作流执行 `npm publish`；`npm stage publish` 始终允许。trusted publishing 需要 npm CLI ≥ 11.5.1 与 Node ≥ 22.14.0——工作流会在发布前自己升级 npm，provenance 也会自动附带。
+`--allow-publish` 允许这个工作流执行 `npm publish`；`npm stage publish` 始终允许。trusted publishing 需要 npm CLI ≥ 11.5.1 与 Node ≥ 22.14.0——发布工作流跑在 Node 24（自带 npm 11.16）上，两者都满足——provenance 也会自动附带。
 
 在本地机器上手动发布走官方流程：`npm login --auth-type=web` 拿两小时会话令牌，发布时需要 2FA 的一次性验证码：
 
