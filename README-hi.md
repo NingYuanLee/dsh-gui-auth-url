@@ -180,11 +180,35 @@ scripts/             prepublishOnly और CI द्वारा उपयोग
 
 प्लगइन एक केवल-पढ़ने योग्य टूल, चार इंस्टेंस टूल और एक मानव कमांड पंजीकृत करता है; `ctx.tools.register` जो disposer लौटाता है वह Cordis के स्वामित्व में है, इसलिए अनलोड या हॉट-रीलोड पर साफ़ हट जाता है।
 
-`v*` टैग पुश करने पर `.github/workflows/publish.yml` चलता है; यदि रिपॉज़िटरी secret `NPM_TOKEN` सेट नहीं है तो वर्कफ़्लो प्रकाशन छोड़ देता है और लॉग में बताता है। मैन्युअल प्रकाशन (ऊपर) अभी भी मान्य है।
+`v*` टैग पुश करने पर `.github/workflows/publish.yml` चलता है, जो **trusted publishing (OIDC)** के ज़रिए npm पर प्रकाशित करता है: वर्कफ़्लो में कोई npm टोकन नहीं होता और उसे रिपॉज़िटरी secret की ज़रूरत नहीं पड़ती। पैकेज में इस रिपॉज़िटरी और इस workflow फ़ाइल के लिए पहले से एक trusted publisher दर्ज होना चाहिए — [Releasing](#releasing) देखें। स्थानीय मशीन से मैन्युअल प्रकाशन अभी भी मान्य है।
 
 ## Releasing
 
-रिलीज़ एक ही कमांड से: `npm run release -- patch|minor|major` (केवल पूर्वावलोकन के लिए `--dry-run` जोड़ें, कुछ भी नहीं बदलता)। पहले पूरी जाँच (टेस्ट, सिंटैक्स, पैकेजिंग) चलती है और विफल होने पर कुछ भी बदले बिना रुक जाती है; फिर संस्करण बढ़ता है, कमिट, टैग और पुश होते हैं। टैग `.github/workflows/publish.yml` को चलाता है, जो Settings → Secrets and variables → Actions में रिपॉज़िटरी secret `NPM_TOKEN` होने पर npm पर प्रकाशित करता है, अन्यथा प्रकाशन छोड़कर लॉग में बताता है।
+रिलीज़ एक ही कमांड से: `npm run release -- patch|minor|major` (केवल पूर्वावलोकन के लिए `--dry-run` जोड़ें, कुछ भी नहीं बदलता)। पहले पूरी जाँच (टेस्ट, सिंटैक्स, पैकेजिंग) चलती है और विफल होने पर कुछ भी बदले बिना रुक जाती है; फिर संस्करण बढ़ता है, कमिट, टैग और पुश होते हैं। टैग `.github/workflows/publish.yml` को चलाता है, जो **trusted publishing (OIDC)** के ज़रिए npm पर प्रकाशित करता है — न कोई npm टोकन, न रिपॉज़िटरी secret पढ़ा जाता है।
+
+trusted publisher एक बार दर्ज करना होता है। npmjs.com → Packages → `dsh-gui-auth-url` → Settings → Trusted publishing → GitHub Actions पर:
+
+| फ़ील्ड | मान |
+|---|---|
+| Organization or user | `NingYuanLee` |
+| Repository | `dsh-gui-auth-url` |
+| Workflow filename | `publish.yml` (केवल फ़ाइल का नाम, एक्सटेंशन सहित, अक्षर-केस बिल्कुल मिलना चाहिए) |
+| Environment name | खाली छोड़ें |
+
+यही प्रविष्टि CLI से भी बनाई जा सकती है (npm ≥ 11.15.0, खाते पर 2FA चालू, पैकेज पहले से registry पर):
+
+```bash
+npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish
+```
+
+`--allow-publish` इस वर्कफ़्लो को `npm publish` चलाने की अनुमति देता है; `npm stage publish` हमेशा अनुमत रहता है। trusted publishing के लिए npm CLI ≥ 11.5.1 और Node ≥ 22.14.0 चाहिए — वर्कफ़्लो प्रकाशन से पहले अपना npm अपग्रेड कर लेता है, और provenance अपने आप जुड़ जाता है।
+
+स्थानीय मशीन से प्रकाशित करने के लिए आधिकारिक तरीका अपनाएँ: `npm login --auth-type=web` दो घंटे का सेशन टोकन देता है, और प्रकाशन के समय 2FA का एक बार का कोड चाहिए:
+
+```bash
+npm login --auth-type=web
+npm publish --access public --tag latest --otp <code>
+```
 
 ## Related
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 未发布（Unreleased）
+
+- **发布流程改用 npm 官方 trusted publishing (OIDC)**：`.github/workflows/publish.yml` 不再读取仓库 Secret，也没有「没有令牌就跳过」的分支——`permissions` 里加 `id-token: write`，工作流直接 `npm publish`，npm 用 OIDC 换取短期发布令牌并自动附带 provenance。登记前提：npmjs.com → 包 Settings → Trusted publishing → GitHub Actions，Organization/user 填 `NingYuanLee`、Repository 填 `dsh-gui-auth-url`、Workflow filename 填 `publish.yml`（只写文件名，含 `.yml`，大小写完全一致）、Environment 留空；也可以用 CLI 一条命令登记：`npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish`（需 npm ≥ 11.15.0、账号开 2FA、包已在 registry 上；`--allow-publish` 允许 `npm publish`）。trusted publishing 要求 npm CLI ≥ 11.5.1、Node ≥ 22.14.0，而 runner 的 Node 22.19.0 自带 npm 10.9.3，因此工作流在发布前自行升级 npm。发版校验、重试、registry 复核与 GitHub Release 等原有逻辑不变。
+- **文档同步为官方两条路**：五份 README 的发布说明不再讲「仓库里配了 npm 令牌才发布」，改成 CI 走 trusted publishing (OIDC)（含上面三个登记字段与 CLI 命令），本地手动发布改为官方方式：先 `npm login --auth-type=web` 拿两小时会话令牌，再 `npm publish --access public --tag latest --otp <验证码>`（发布时由本人完成 2FA 一次性验证码授权）。运行时无改动。
+
 ## 0.8.3
 
 - 把 `engines.dsh` 放宽为 `>=0.2.1-rc.2 <0.3.0-0 || >=0.2.2-0 <0.3.0-0`，让声明区间覆盖本插件实测通过的 DSH 0.2.2 预发布线；原单区间写法会排除 0.2.2 预发布，而 peer 区间本就接受它。运行时无改动。
@@ -28,7 +33,7 @@
 
 ## 0.7.2
 
-- 发布流程自动化：新增 `npm run release -- <patch|minor|major>`（支持 `--dry-run` 预览）与 `preversion` 校验门禁（测试 + 语法 + 打包不通过就不改版本）；Publish 工作流在发布后轮询 registry 校验该版本存在并打印 `latest` dist-tag；五份 README 增加 Releasing 章节。仓库已配置 `NPM_TOKEN` Secret，打 tag 即可由 CI 自动发布。
+- 发布流程自动化：新增 `npm run release -- <patch|minor|major>`（支持 `--dry-run` 预览）与 `preversion` 校验门禁（测试 + 语法 + 打包不通过就不改版本）；Publish 工作流在发布后轮询 registry 校验该版本存在并打印 `latest` dist-tag；五份 README 增加 Releasing 章节。当时用仓库 Secret 里的 npm 自动化令牌发布，打 tag 即由 CI 自动发布（该方式已在「未发布」条目中换成 trusted publishing）。
 
 ## 0.7.1
 

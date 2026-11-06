@@ -181,11 +181,35 @@ scripts/             verificação do tarball usada por prepublishOnly e CI
 
 O plugin registra uma ferramenta somente leitura, quatro ferramentas de instância e um comando humano; os disposers retornados por `ctx.tools.register` pertencem ao Cordis, então descarregar ou recarregar o plugin os remove de forma limpa.
 
-Empurrar uma tag `v*` dispara `.github/workflows/publish.yml`; se o secret do repositório `NPM_TOKEN` não estiver configurado, o fluxo pula a publicação e registra isso no log. A publicação manual (acima) continua válida.
+Empurrar uma tag `v*` dispara `.github/workflows/publish.yml`, que publica no npm por **trusted publishing (OIDC)**: o fluxo não leva nenhum token do npm nem precisa de secret do repositório. O pacote precisa já ter um trusted publisher registrado para este repositório e este arquivo de workflow — veja [Releasing](#releasing). A publicação manual a partir de uma máquina local continua válida.
 
 ## Releasing
 
-Lançar uma versão é um comando: `npm run release -- patch|minor|major` (adicione `--dry-run` para apenas pré-visualizar, sem alterar nada). Ele roda a validação completa (testes, sintaxe, empacotamento) primeiro e aborta sem tocar em nada se algo falhar; depois sobe a versão, faz o commit, cria a tag e envia. A tag dispara `.github/workflows/publish.yml`, que publica no npm quando o secret do repositório `NPM_TOKEN` está configurado em Settings → Secrets and variables → Actions; caso contrário, pula a publicação e registra isso no log.
+Lançar uma versão é um comando: `npm run release -- patch|minor|major` (adicione `--dry-run` para apenas pré-visualizar, sem alterar nada). Ele roda a validação completa (testes, sintaxe, empacotamento) primeiro e aborta sem tocar em nada se algo falhar; depois sobe a versão, faz o commit, cria a tag e envia. A tag dispara `.github/workflows/publish.yml`, que publica no npm por **trusted publishing (OIDC)** — sem nenhum token do npm e sem ler secrets do repositório.
+
+É preciso registrar uma vez o trusted publisher. Em npmjs.com → Packages → `dsh-gui-auth-url` → Settings → Trusted publishing → GitHub Actions:
+
+| Campo | Valor |
+|---|---|
+| Organization or user | `NingYuanLee` |
+| Repository | `dsh-gui-auth-url` |
+| Workflow filename | `publish.yml` (só o nome do arquivo, com a extensão e as maiúsculas exatas) |
+| Environment name | vazio |
+
+A mesma entrada pode ser criada pela CLI (npm ≥ 11.15.0, 2FA da conta ativado, pacote já publicado no registry):
+
+```bash
+npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish
+```
+
+`--allow-publish` permite que este fluxo execute `npm publish`; `npm stage publish` é sempre permitido. Trusted publishing exige npm CLI ≥ 11.5.1 e Node ≥ 22.14.0 — o fluxo atualiza o próprio npm antes de publicar, e o provenance é anexado automaticamente.
+
+Para publicar a partir de uma máquina local, use o fluxo oficial: `npm login --auth-type=web` dá um token de sessão de duas horas, e a publicação exige um código 2FA de uso único:
+
+```bash
+npm login --auth-type=web
+npm publish --access public --tag latest --otp <code>
+```
 
 ## Related
 

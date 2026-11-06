@@ -7,8 +7,9 @@
  * committed; a red check aborts the release with the tree untouched.
  *
  * Pushing the tag is what publishes: `.github/workflows/publish.yml` runs
- * `npm publish` on any `v*` tag when the repository secret `NPM_TOKEN` exists,
- * and skips cleanly when it does not. Nothing is published from this machine.
+ * `npm publish` on any `v*` tag through npm trusted publishing (OIDC) — the
+ * workflow carries no token and needs no repository secret. Nothing is
+ * published from this machine.
  *
  * Usage: npm run release -- <patch|minor|major> [--dry-run]
  */
@@ -105,5 +106,5 @@ run('git', ['push', 'origin', 'HEAD']);
 run('git', ['push', 'origin', `v${released}`]);
 
 process.stdout.write(`\nreleased v${released}\n`);
-process.stdout.write('GitHub Actions publishes it when the repository secret NPM_TOKEN is configured;\n');
-process.stdout.write('otherwise the Publish run skips and you can still publish manually.\n');
+process.stdout.write('GitHub Actions publishes it through npm trusted publishing (OIDC);\n');
+process.stdout.write('the package needs a trusted publisher registered for this repository and workflow file.\n');

@@ -1,19 +1,36 @@
 name: Publish
 
-# Publishing is manual by default (see README: Development). This workflow
-# publishes the tagged version when the repository secret NPM_TOKEN exists, and
-# skips cleanly when it does not — a missing secret must not fail a release tag.
+# Publishing runs through npm trusted publishing (OIDC): the workflow carries no
+# npm token and needs no repository secret. npm accepts the publish when the
+# package's "Trusted publishing" entry names this repository and this workflow
+# file, and exchanges the workflow's OIDC token for a short-lived publish token.
 #
-# Configure the secret once under Settings -> Secrets and variables -> Actions
-# -> New repository secret, name NPM_TOKEN, value = an npm automation token with
-# publish rights for this package (npm -> Access Tokens -> Generate New Token).
+# One-time prerequisite on npmjs.com -> Packages -> dsh-gui-auth-url ->
+# Settings -> Trusted publishing -> GitHub Actions:
+#   Organization or user: NingYuanLee
+#   Repository:           dsh-gui-auth-url
+#   Workflow filename:    publish.yml   (file name only, extension included, case must match exactly)
+#   Environment name:     (leave empty)
+#
+# The same entry can be created from the CLI (npm >= 11.15.0, account 2FA on,
+# package already on the registry):
+#   npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish
+#
+# Trusted publishing needs npm CLI >= 11.5.1 and Node >= 22.14.0; the runner
+# below pins Node 24 (npm 11.16), which satisfies both. Provenance is attached
+# automatically, so no --provenance flag is needed.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # id-token: write is the OIDC permission npm trusted publishing needs: it lets
+  # GitHub Actions mint the OIDC token that npm exchanges for a publish token.
+  id-token: write
+  # contents: write covers creating the GitHub Release and uploading the packed
+  # tarball.
+  contents: write
 
 jobs:
   publish:
@@ -22,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.19.0'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Tag must match package.json
@@ -33,14 +50,25 @@ jobs:
       - name: Install peer dependencies for the prepublish checks
         run: npm install --no-save @deepseek-ai/dsh-tools@0.2.1-rc.2
 
-      - name: Publish unless the token is absent
+      - name: Pack the installable tarball
+        run: npm pack
+
+      - name: Create the GitHub release
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN is not configured; skipping npm publish"
-            exit 0
-          fi
+          VERSION="$(node -p "require('./package.json').version")"
+          FLAGS=()
+          case "$VERSION" in *-*) FLAGS+=(--prerelease) ;; esac
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" \
+              --title "dsh-gui-auth-url $GITHUB_REF_NAME" \
+              --generate-notes \
+              "${FLAGS[@]}"
+          gh release upload "$GITHUB_REF_NAME" "dsh-gui-auth-url-$VERSION.tgz" --clobber
+
+      - name: Publish to npm
+        run: |
           version="$(node -p "require('./package.json').version")"
           # A previous run may have published (or staged) this version already; wait
           # for registry visibility before attempting, so re-tagging does not race.
@@ -68,13 +96,7 @@ jobs:
           exit 1
 
       - name: Verify the tagged version is on the registry
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN is not configured; nothing to verify"
-            exit 0
-          fi
           version="$(node -p "require('./package.json').version")"
           for attempt in $(seq 1 30); do
             published="$(npm view "dsh-gui-auth-url@$version" version 2>/dev/null || true)"

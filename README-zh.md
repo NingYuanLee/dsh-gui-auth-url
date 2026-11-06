@@ -215,11 +215,35 @@ scripts/            prepublishOnly 与 CI 使用的 tarball 检查
 
 插件注册一个只读工具、四个实例工具和一条人类命令；`ctx.tools.register` 返回的 disposer 由 Cordis 持有，卸载或热重载时会干净移除。
 
-推送 `v*` 标签会触发 `.github/workflows/publish.yml`；仓库 Secret 未配置 `NPM_TOKEN` 时该工作流跳过发布并在日志里说明。手动发布（上面的流程）仍然有效。
+推送 `v*` 标签会触发 `.github/workflows/publish.yml`，它通过 **trusted publishing (OIDC)** 发布到 npm：工作流里没有任何 npm 令牌，也不读仓库 Secret。前提是这个包已经为该仓库和该 workflow 文件登记了 trusted publisher——见 [Releasing](#releasing)。在本地机器上手动发布仍然有效。
 
 ## Releasing
 
-发布用一条命令：`npm run release -- patch|minor|major`（加 `--dry-run` 只预览，不改任何东西）。它会先跑完整校验（测试 + 语法 + 打包），不通过就中止且不动文件；通过后改版本、提交、打 tag 并推送。tag 推送后由 `.github/workflows/publish.yml` 自动发布：仓库在 Settings → Secrets and variables → Actions 里配置了名为 `NPM_TOKEN` 的 npm 自动化令牌就发布，没配置就跳过并在日志里说明。
+发布用一条命令：`npm run release -- patch|minor|major`（加 `--dry-run` 只预览，不改任何东西）。它会先跑完整校验（测试 + 语法 + 打包），不通过就中止且不动文件；通过后改版本、提交、打 tag 并推送。tag 推送后由 `.github/workflows/publish.yml` 通过 **trusted publishing (OIDC)** 发布到 npm——流程里没有 npm 令牌，也不读仓库 Secret。
+
+trusted publisher 需要登记一次。在 npmjs.com → Packages → `dsh-gui-auth-url` → Settings → Trusted publishing → GitHub Actions：
+
+| 字段 | 填写内容 |
+|---|---|
+| Organization or user | `NingYuanLee` |
+| Repository | `dsh-gui-auth-url` |
+| Workflow filename | `publish.yml`（只写文件名，含 `.yml`，大小写要完全一致） |
+| Environment name | 留空 |
+
+同一份登记也可以用 CLI 建（需要 npm ≥ 11.15.0、账号开了 2FA、包已在 registry 上）：
+
+```bash
+npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish
+```
+
+`--allow-publish` 允许这个工作流执行 `npm publish`；`npm stage publish` 始终允许。trusted publishing 需要 npm CLI ≥ 11.5.1 与 Node ≥ 22.14.0——工作流会在发布前自己升级 npm，provenance 也会自动附带。
+
+在本地机器上手动发布走官方流程：`npm login --auth-type=web` 拿两小时会话令牌，发布时需要 2FA 的一次性验证码：
+
+```bash
+npm login --auth-type=web
+npm publish --access public --tag latest --otp <code>
+```
 
 ## Related
 

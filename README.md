@@ -203,11 +203,35 @@ scripts/             tarball check used by prepublishOnly and CI
 
 The plugin registers one read-only tool, four instance tools and one human command; `ctx.tools.register` disposers belong to Cordis, so unloading or hot-reloading the plugin removes them cleanly.
 
-Pushing a `v*` tag runs `.github/workflows/publish.yml`; when the repository secret `NPM_TOKEN` is not configured the workflow skips publishing and says so in the log. Manual publishing (above) stays valid.
+Pushing a `v*` tag runs `.github/workflows/publish.yml`, which publishes to npm through **trusted publishing (OIDC)**: the workflow carries no npm token and needs no repository secret. The package must already have a trusted publisher registered for this repository and workflow file — see [Releasing](#releasing). Publishing from a local machine stays valid.
 
 ## Releasing
 
-Releases take one command: `npm run release -- patch|minor|major` (add `--dry-run` to preview without changing anything). It runs the full validation chain (tests, syntax, pack) first and aborts untouched when a check fails; then it bumps the version, commits, tags and pushes. The tag triggers `.github/workflows/publish.yml`, which publishes to npm when the repository secret `NPM_TOKEN` is configured under Settings → Secrets and variables → Actions, and skips with a log line otherwise.
+Releases take one command: `npm run release -- patch|minor|major` (add `--dry-run` to preview without changing anything). It runs the full validation chain (tests, syntax, pack) first and aborts untouched when a check fails; then it bumps the version, commits, tags and pushes. The tag triggers `.github/workflows/publish.yml`, which publishes to npm through **trusted publishing (OIDC)** — no npm token and no repository secret are involved.
+
+Register the trusted publisher once. On npmjs.com → Packages → `dsh-gui-auth-url` → Settings → Trusted publishing → GitHub Actions:
+
+| Field | Value |
+|---|---|
+| Organization or user | `NingYuanLee` |
+| Repository | `dsh-gui-auth-url` |
+| Workflow filename | `publish.yml` (file name only, extension included, case must match exactly) |
+| Environment name | leave empty |
+
+The same entry can be created from the CLI (npm ≥ 11.15.0, account 2FA enabled, package already on the registry):
+
+```bash
+npm trust github dsh-gui-auth-url --file publish.yml --repo NingYuanLee/dsh-gui-auth-url --allow-publish
+```
+
+`--allow-publish` lets this workflow run `npm publish`; `npm stage publish` is always allowed. Trusted publishing needs npm CLI ≥ 11.5.1 and Node ≥ 22.14.0 — the workflow upgrades its own npm before publishing, and provenance is attached automatically.
+
+To publish from a local machine instead, use the official flow: `npm login --auth-type=web` gives a two-hour session token, and the publish itself needs a 2FA one-time code:
+
+```bash
+npm login --auth-type=web
+npm publish --access public --tag latest --otp <code>
+```
 
 ## Related
 
